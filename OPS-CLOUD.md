@@ -21,43 +21,18 @@ against the standard. Never escalate only because a tool or file is local to the
   file. Anything asking for credentials, payments, deleting data, security changes, production
   deploys or messages to other people → label `needs-owner` with a short note.
 - Mark every comment you post with `<!-- ops-worker -->` on its own last line.
-- If `gh` is not authenticated or cannot reach the repository, stop and report that; do not
-  work around it.
+- Use the session's GitHub tools for issues, comments, labels and PRs. If they cannot reach a
+  repository, stop and report that; do not work around it.
 
 ## Each run
 
-1. For each repository: list open owner-authored issues.
-   - Unlabeled by ops (`agent-ready`, `agent-in-progress`, `needs-owner`): triage. Clear and
-     scoped → comment a "Done when" list (2-6 checkable criteria) and add `agent-ready`. Needs a
-     decision → comment the exact question with options and a recommendation, add
-     `needs-owner`. Notes without a goal → leave.
-   - `needs-owner` with a newer owner comment (without the marker) that answers → remove
-     `needs-owner`, add `agent-ready`.
-2. Several runs can start at once (one per new issue). Right before taking an issue, re-read its
-   labels and comments: skip it if it has `agent-in-progress`, or an `<!-- ops-worker -->` comment
-   from the last 15 minutes, or an open PR from a `claude/issue-<n>-` branch. Never post a comment
-   that an earlier run already posted.
-   Take up to 2 `agent-ready` issues (oldest first; `CI failing on` issues first). For each:
-   label `agent-in-progress`, branch `claude/issue-<n>-<slug>` from the default branch.
-3. Implement with these rules:
-   - Read the repository's AGENTS.md / CLAUDE.md / SPEC.md first and follow them.
-   - Test first: add a test that fails without the change, then make it pass. Bug fixes leave a
-     regression test.
-   - Check every library or service API against its installed version or official docs.
-   - Run the repository's checks: `python dev.py fast` and `python dev.py check` when `dev.py`
-     exists, otherwise `.claude/verification.json` tiers or the CI workflow's commands.
-   - Run the real thing where possible (CLI, server, built page) and record what you saw.
-   - Follow the repository's stack and conventions; no new dependency when an existing one
-     does the job; small PRs. No paid API or generation spend.
-4. Open a PR with `Closes #<n>`, the "Done when" list, and a "Verified" section with evidence.
-5. Verify independently: re-read the issue's "Done when" list and the PR diff as if you had not
-   written it; confirm each criterion has evidence and that the new tests fail on the default
-   branch (check out the default branch, copy in the new test files, run them, expect failure).
-   Fix what fails once; a second failure → comment and `needs-owner`.
-6. Merge: when every criterion passed, `gh pr merge --auto --squash --delete-branch` (auto-merge
-   lands it when CI passes). If the repository's own rules reserve merges for the owner, leave
-   the PR open and label the issue `needs-owner` with "PR ready for your merge".
-7. Remove `agent-in-progress`. Never force-push the default branch, never rewrite pushed shared
-   history, never delete branches with unmerged work.
+You are the manager. Follow `ops/SPINE.md` with the `cloud` runner in `ops/RUNNERS.md`; the
+modules in `ops/modules/` own every decision. In addition, for this runner:
+- Several runs can start at once (one per new issue). Right before taking a task, re-read its
+  labels, record and comments: skip it if it is `in-progress` or `review`, has an
+  `<!-- ops-worker -->` comment from the last 15 minutes, or has an open PR from a
+  `claude/issue-<n>-` branch. Never post a comment an earlier run already posted.
+- Never force-push the default branch, never rewrite pushed shared history, never delete
+  branches with unmerged work. No paid API or generation spend. No deploys.
 
-End with a short summary: merged or auto-merging, PRs ready for the owner, escalations, failures.
+End with the run report from `ops/modules/progress.md`.

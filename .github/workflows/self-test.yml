@@ -1,0 +1,15 @@
+name: self-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  helpers:
+    uses: ./.github/workflows/check.yml
+    with:
+      python-version: "3.12"
+      dependency-cache: false
+      setup-command: "true"
+      check-command: python ops/helpers/test_taskrec.py && python -m py_compile ops/helpers/ghtask.py ops/helpers/formula.py
