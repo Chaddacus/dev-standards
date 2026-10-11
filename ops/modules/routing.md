@@ -20,7 +20,9 @@ Overrides: `routing` in `~/.claude/ops/config.json` (task kind → model) wins f
 The weekly improvement pass changes it only through `metrics.routing_decision` (ops/METRICS.md):
 20+ tasks per model within a size band, a 95% interval that clears the threshold, the same rule
 in both directions, credit to the first attempt's model, and an alternating trial before any
-switch. Review strength is chosen from the diff, never from the task's size. Fable 5.1 is on trial for
+switch. While the ops config has a `trial` for a size band, alternate its two models by issue
+number (even → first, odd → second) and record the reason "trial". Review strength is chosen from
+the diff, never from the task's size. Fable 5.1 is on trial for
 the planning phase when the config says `"plan": "fable"`.
 
 ## Environment
