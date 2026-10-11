@@ -1,0 +1,66 @@
+# Reusable CI check (rapid-dev standard). Call it from a repository:
+#
+#   jobs:
+#     check:
+#       uses: Chaddacus/dev-standards/.github/workflows/check.yml@v1
+#       with:
+#         python-version: "3.12"     # and/or node-version: "24"
+#
+# Defaults run `python dev.py setup` then `python dev.py check`. Improve CI here once and
+# every repository that calls @v1 gets it. The required status check is named "check / check".
+name: check
+
+on:
+  workflow_call:
+    inputs:
+      python-version: {type: string, default: ""}
+      node-version: {type: string, default: ""}
+      setup-command: {type: string, default: "python dev.py setup"}
+      check-command: {type: string, default: "python dev.py check"}
+      dependency-cache: {type: boolean, default: true}
+      lfs: {type: boolean, default: false}
+      runs-on: {type: string, default: ubuntu-latest}
+      timeout-minutes: {type: number, default: 30}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: ${{ inputs.lfs }}
+          fetch-depth: 0
+      - if: inputs.python-version != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - if: inputs.python-version != '' && inputs.dependency-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/pyproject.toml', '**/requirements*.txt', '**/uv.lock') }}
+          restore-keys: pip-${{ runner.os }}-${{ inputs.python-version }}-
+      - if: inputs.node-version != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      - if: inputs.node-version != '' && inputs.dependency-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-${{ inputs.node-version }}-
+      - name: Setup
+        run: ${{ inputs.setup-command }}
+      - name: Check
+        run: ${{ inputs.check-command }}
