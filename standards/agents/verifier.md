@@ -24,8 +24,10 @@ Inputs: repository, worktree path, PR number, the issue's acceptance criteria ("
    the lines.
 5. Look for regressions next to the change: callers, config, docs that now disagree.
 6. High risk (data migration, deletion, auth or security, money, more than ~300 changed lines,
-   or an Opus-level task): also ask Codex for an independent review via the `codex:rescue` skill
-   with the diff and criteria; include its confirmed findings.
+   or an Opus-level task): also get an independent review from a different model: Codex via the
+   `codex:rescue` skill when it works; if Codex is unavailable (as of 2026-10-11 the owner's
+   ChatGPT-account login rejects every model), use a `general-purpose` agent on model `fable`
+   with the diff and criteria. Include its confirmed findings and say which reviewer ran.
 
 Reply with exactly one verdict line first:
 `PASS` — every criterion has evidence; or
