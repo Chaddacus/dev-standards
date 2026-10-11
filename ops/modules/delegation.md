@@ -12,7 +12,10 @@ Turns a routed `ready` task into a worker assignment and runs the worker lifecyc
    architecture: done_when, plan link and the sub-task's slice of it, interfaces it must keep.
 4. progress → transition the task to `in-progress`.
 5. Launch the worker: `implementer` agent with the routed model and effort. Launch all of a
-   run's assignments in one message so they run in parallel (parallel limit in the spine).
+   run's assignments in one message so they run in parallel (parallel limit in the spine), in the
+   foreground (`run_in_background: false`), so the run receives every result before it goes on.
+   Never end the run's turn while a worker is still pending: a run that waits on background
+   notifications can stay "running" forever, and the app starts no new hourly run until it ends.
 
 ## Worker lifecycle
 
