@@ -1,0 +1,32 @@
+# Development override (rapid-dev standard). Same Dockerfile and services as compose.yml;
+# only adds hot reload. Start with:
+#   docker compose -f compose.yml -f compose.dev.yml up --watch
+# (or `python dev.py dev`). Production never loads this file.
+#
+# watch actions:
+#   sync          copy changed files into the running container (the app reloads itself:
+#                 uvicorn --reload, watchfiles, vite, tsx watch)
+#   sync+restart  copy, then restart the container (servers without their own reload)
+#   rebuild       rebuild the image (dependency or Dockerfile changes)
+services:
+  app:
+    build:
+      context: .
+      target: dev            # multi-stage Dockerfile: `dev` stage adds the reloader and dev deps
+    environment:
+      APP_ENV: development
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /app/src
+          ignore:
+            - "**/__pycache__/"
+            - "**/node_modules/"
+        - action: sync+restart
+          path: ./config
+          target: /app/config
+        - action: rebuild
+          path: ./pyproject.toml   # or package.json / lockfile
+        - action: rebuild
+          path: ./Dockerfile
