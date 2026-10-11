@@ -25,7 +25,9 @@ Every new record also sets (ops/METRICS.md):
 - `origin`: `owner` for issues the owner wrote; `system` for issues agents filed (sub-tasks,
   baseline gaps, flaky tests); `monitor` for live-monitor issues; `regression-fix` for fixes of
   an agent-caused bug (0 points).
-- A skip still gets a short comment with the reason, so the digest can list skips.
+- A skip still gets a short comment with the reason (`ghtask.py comment`), so the digest can list skips.
+- Every manager comment (questions, plans, skips) goes through `ghtask.py comment` so it carries the
+  worker marker; an unmarked comment counts as the owner's.
 
 ## plan (state `planning`)
 

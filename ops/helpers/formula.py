@@ -65,8 +65,9 @@ def fetch_task(repo, issue):
         try:
             p = gh_json("pr", "view", ref, "-R", repo, "--json", "number,url,mergedAt")
             prs[p["number"]] = {"number": p["number"], "url": p["url"], "merged_at": p.get("mergedAt")}
-        except FetchError:
-            pass
+        except FetchError as e:
+            if "not found" not in str(e).lower() and "could not resolve" not in str(e).lower():
+                raise
     return {"repo": repo, "number": n, "created_at": issue["created_at"], "closed_at": issue.get("closed_at"),
             "state": issue["state"].upper(), "state_reason": (issue.get("state_reason") or "").upper() or None,
             "comments": comments, "events": events, "prs": list(prs.values())}
@@ -84,7 +85,8 @@ def fetch(repos, since):
         for issue in issues:
             labels = {l["name"] for l in issue.get("labels", [])}
             if "agent-regression" in labels:
-                regs.append({"repo": repo, "number": issue["number"], "body": issue.get("body") or ""})
+                regs.append({"repo": repo, "number": issue["number"], "body": issue.get("body") or "",
+                             "created_at": issue["created_at"]})
             try:
                 t = fetch_task(repo, issue)
                 if t:
@@ -96,7 +98,7 @@ def fetch(repos, since):
 
 def load_ctx(now):
     cfg = json.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
-    deploy = [r for r, v in cfg.get("repos", {}).items() if v.get("deploy") in ("auto", "paused")]
+    deploy = [r for r, v in cfg.get("repos", {}).items() if v.get("deploy") == "auto"]  # paused = not deploying
     return {"manager_login": ME, "owner_login": ME, "deploy_repos": deploy, "now": now}
 
 
@@ -114,6 +116,8 @@ def main():
     now = datetime.now(timezone.utc)
     until = args.until or now.isoformat()
     since = args.since or (now - timedelta(days=7)).isoformat()
+    if not args.from_json and not args.repos:
+        a.error("--repos is required (or --from-json)")
     if args.from_json:
         data = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
         ME = data["ctx"]["manager_login"]
@@ -133,13 +137,18 @@ def main():
         print(json.dumps({"summary": s, "tasks": tasks}, indent=1, default=str))
         return
     print(f"Cohort {since[:10]} to {until[:10]}: {s['cohort']} tasks ({s['parents']} parents excluded); outcomes {s['outcomes']}")
-    print(f"E {s['E']} FTR points per task-hour  (= Ac {s['Ac']['show']} / {s['h_per_point']} h per point)")
-    print(f"Au {s['Au']['show']} ci {s['Au']['ci95']}   owner minutes {s['owner_minutes']} {s['owner_minutes_by_cause']}")
+    print(f"Ended {s['ended']}{'  (PROVISIONAL)' if s['provisional'] else ''}; pending live {s['pending_live']}")
+    print(f"E {s['E']} FTR points per task-hour (= Ac {s['Ac_points']} by points / {s['h_per_point']} h per point); "
+          f"E without queue {s['E_service']}")
+    print(f"Ac {s['Ac']['show']} tasks ci {s['Ac']['ci95']}")
+    print(f"Au {s['Au']['show']} ci {s['Au']['ci95']} bounds {s['Au']['bounds']} ({s['Au']['undetermined']} undetermined)")
+    print(f"Owner minutes {s['owner_minutes']} {s['owner_minutes_by_cause']}; unknown-cause events {s['unknown_owner_events']}")
     print(f"Escapes {s['escape_rate']['show']} (mature), {s['escape_rate']['provisional']} still provisional")
     print(f"Hours per point by stage {s['h_by_stage_per_point']}")
-    print(f"Lead time by size {s['lead_by_band']}   WIP {s['wip']}  oldest open {s['oldest_open_h']} h")
+    print(f"By size band {s['by_band']}   WIP {s['wip']}  oldest open {s['oldest_open_h']} h")
     print(f"S {s['S']} ({s['S_source']})   cost per FTR point {s['cost_per_ftr_point']}   "
-          f"self-made {s['self_made_share']['show']}   record mismatches {s['record_mismatches']}")
+          f"self-made {s['self_made_share']['show']}   record mismatches {s['record_mismatches']}   "
+          f"bad records {s['bad_records']}")
     if errors:
         print(f"{len(errors)} fetch errors (first: {errors[0]})")
 

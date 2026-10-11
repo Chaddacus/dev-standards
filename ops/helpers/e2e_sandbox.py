@@ -38,7 +38,7 @@ def issue(title):
 
 def rec(n, state, size=2, **extra):
     return {"task": f"ops-sandbox#{n}", "kind": "fix", "size": size, "size_at_triage": size,
-            "state": state, "done_when": ["scenario step"], **extra}
+            "origin": "owner", "state": state, "done_when": ["scenario step"], **extra}
 
 
 def merged_pr(n, tag):
@@ -64,6 +64,7 @@ def main():
     gt("set-record", a, rec(a, "in-progress", model="sonnet", effort="medium", routing_reason="e2e"))
     gt("append", a, {"model": "sonnet", "started_at": datetime.now(timezone.utc).isoformat(),
                      "finished_at": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()}, "attempts")
+    sh([sys.executable, str(GHTASK), "comment", REPO, str(a)], input="Plan: one-line change.")
     pr_a = merged_pr(a, tag)
     r = json.loads(gt("get-record", a))
     gt("set-record", a, dict(r, state="review"))
@@ -124,9 +125,11 @@ def main():
         "shipped points 2+3": s["shipped_points"] == 5,
         "A first-time right": tasks[str(a)]["ftr"] is True,
         "B fix round recorded and derived": tasks[str(b)]["fix_rounds"] == 1 and tasks[str(b)]["ftr"] is False,
-        "Ac = 2 of 5 points": s["Ac"]["k"] == 2 and s["Ac"]["n"] == 5,
-        "Au: A, B autonomous; C dropped; D rescue": s["Au"]["k"] == 2 and s["Au"]["n"] == 4,
-        "stages sum to active time": all(abs(sum(t["stages"].values()) - t["active_h"]) < 1e-6 for t in tasks.values()),
+        "Ac = 1 of 2 tasks; 2 of 5 points": s["Ac"]["k"] == 1 and s["Ac"]["n"] == 2 and s["Ac_points"] == 0.4,
+        "manager comment does not count as owner": tasks[str(a)]["unknown_owner_events"] == 0,
+        # C was dropped by an owner intent decision: left out of Au (v3.1). D is a rescue.
+        "Au: A, B autonomous of A, B, D": s["Au"]["k"] == 2 and s["Au"]["n"] == 3,
+        "stages sum to lead time": all(abs(sum(t["stages"].values()) - t["lead_h"]) < 1e-6 for t in tasks.values()),
         "worker time from attempts on A": tasks[str(a)]["worker_h_source"] == "attempts",
         "no fetch errors": not s["errors"],
         "refused: done without review": dict(refused)["skip review"],

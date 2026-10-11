@@ -9,12 +9,15 @@ with its GitHub tools; the rules live in taskrec.py and the progress module.
                                                        owner_events, write (no lost updates)
   ghtask.py bump        <owner/repo> <n> <field>    -> re-read, +1 fix_rounds or owner_touches
   ghtask.py post-update <owner/repo> <n> < update   -> validates and appends a worker update
+  ghtask.py comment     <owner/repo> <n> < text     -> manager comment with the worker marker
+  ghtask.py live        <owner/repo> <n> <sha>      -> deploy step: record live_at
   ghtask.py deps        <owner/repo> <n>            -> {"open": [...]} unfinished dependencies
 
 Only records written by the manager's login count; any other "record" is ignored.
 """
 import json
 import os
+from datetime import datetime, timezone
 import re
 import subprocess
 import sys
@@ -72,6 +75,8 @@ def get_record(repo, n):
 
 
 def write_record(repo, n, record, old):
+    if not old and (record.get("size_at_triage") is None or not record.get("origin")):
+        sys.exit("set-record: the first record needs size_at_triage and origin (ops/METRICS.md)")
     if old:
         helper("check-update", json.dumps({"old": old, "new": record}))
     helper("transition", json.dumps({"from": old.get("state", "new"), "to": record["state"]})) \
@@ -104,6 +109,8 @@ def append(repo, n, field, item):
     old = get_record(repo, n)
     if not old:
         sys.exit("append: no record yet")
+    if field == "owner_events" and not item.get("at"):
+        item = dict(item, at=datetime.now(timezone.utc).isoformat())
     new = dict(old, **{field: list(old.get(field) or []) + [item]})
     write_record(repo, n, new, old)
 
@@ -115,6 +122,23 @@ def bump(repo, n, field):
     if not old:
         sys.exit("bump: no record yet")
     write_record(repo, n, dict(old, **{field: (old.get(field) or 0) + 1}), old)
+
+
+def live(repo, n, sha):
+    """Deploy step: the change is live (health check passed)."""
+    old = get_record(repo, n)
+    if not old:
+        sys.exit("live: no record")
+    new = dict(old, live_at=datetime.now(timezone.utc).isoformat(), notes=f"live at {sha}")
+    write_record(repo, n, new, old)
+
+
+def comment(repo, n, text):
+    """Every manager comment goes through here so it carries the worker marker; unmarked comments
+    from the shared login count as owner actions (ops/METRICS.md)."""
+    body = text.rstrip() + "\n\n" + metrics.WORKER_MARK
+    gh("api", "-X", "POST", f"repos/{repo}/issues/{n}/comments", "-f", f"body={body}")
+    print(json.dumps({"ok": True}))
 
 
 def post_update(repo, n, update):
@@ -146,6 +170,10 @@ def main():
         append(repo, n, sys.argv[4], json.loads(sys.stdin.read()))
     elif cmd == "bump" and len(sys.argv) == 5:
         bump(repo, n, sys.argv[4])
+    elif cmd == "live" and len(sys.argv) == 5:
+        live(repo, n, sys.argv[4])
+    elif cmd == "comment":
+        comment(repo, n, sys.stdin.read())
     elif cmd == "post-update":
         post_update(repo, n, json.loads(sys.stdin.read()))
     elif cmd == "deps":

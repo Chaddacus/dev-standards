@@ -11,16 +11,20 @@ The spine and modules are the same everywhere; only these adapters differ.
 - Helpers: `python <dev-standards>/ops/helpers/taskrec.py`, `ghtask.py` (gh CLI), `formula.py`;
   `<dev-standards>` = `~/code/personal/dev-standards` (pull it at the start of each run).
 - Workers: `implementer`, `verifier`, `reader` agents from `~/.claude/agents/`.
-- Extra duties: lock file, pending deploys (`deploy_pending` → `python dev.py deploy`, record
-  the SHA in `~/.claude/ops/deployed.json`), ops log `~/.claude/ops/log.jsonl`.
+- Extra duties: lock file, pending deploys (`deploy_pending` → `python dev.py deploy`; on a
+  passed health check record the SHA in `~/.claude/ops/deployed.json` and run
+  `ghtask.py live <repo> <n> <sha>` for each task in that deploy), ops log
+  `~/.claude/ops/log.jsonl`.
 - Rules: `~/.claude/CLAUDE.md`. Hooks enforce guardrails and pre-push checks.
 
 ## cloud (routine "Cloud ops worker (issues opened + hourly)")
 
 - Repositories: the ones checked out in the session (except dev-standards).
 - Queue and records: the GitHub tools available in the session (list issues, read/write
-  comments, labels). Before every state change run `python ops/helpers/taskrec.py transition`
-  and render records/updates with `taskrec.py` so the format is identical to local.
+  comments, labels). Before every state change run `python ops/helpers/taskrec.py transition`,
+  and before rewriting a record run `taskrec.py check-update` with the old and new record (frozen
+  size, counters only grow). Render records and updates with `taskrec.py` so the format is
+  identical to local. End every other comment with `<!-- ops-worker -->`.
 - Helpers: `taskrec.py` (pure Python, no network). `ghtask.py` and `formula.py` need the gh CLI;
   use the GitHub tools instead.
 - Workers: the agent definitions in `standards/agents/` (paste the relevant one into the Agent

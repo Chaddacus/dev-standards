@@ -23,7 +23,10 @@ append-only comments.
     security, deletion, deploy approvals; `intent` = only the owner knows what they want;
     `rescue` = the agents could not do the work. Only `rescue` (and anything unknown) lowers Au.
 - **merge and live**: when the PR merges, write `pr` (URL) and `merged_at`; for deploy repos the
-  deploy step writes `live_at` after the health check passes.
+  deploy step runs `ghtask.py live <repo> <n> <sha>` after the health check passes.
+- **every manager comment** (plans, questions, escalations, skips, notes) goes through
+  `ghtask.py comment` (cloud: end the text with `<!-- ops-worker -->`). Unmarked comments from
+  the shared login count as owner actions.
 - **close**: `done` with a merged PR, `no_change: true`, or `children` closes as completed;
   anything else closes as not planned (it counts as dropped).
 - **checkpoint** (end of run): every task touched this run has a record matching its label; no
