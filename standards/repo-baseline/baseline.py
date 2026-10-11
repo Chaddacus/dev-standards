@@ -32,6 +32,8 @@ LABELS = [
     ("needs-owner", "B60205", "Blocked on an owner decision or access; agent continues other work"),
     ("agent-ready", "0E8A16", "Approved for the autonomous ops worker to pick up"),
     ("agent-in-progress", "FBCA04", "The ops worker is working on this now"),
+    ("agent-review", "5319E7", "Work finished; the manager is reviewing it before done"),
+    ("blocked", "000000", "Waiting on another task or dependency"),
     ("agent-regression", "D93F0B", "Bug traced to a merged agent change; fix test-first and add a global guard"),
 ]
 ACTIONS_APP_ID = 15368
