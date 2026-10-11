@@ -16,6 +16,9 @@ Windows without make). Standard tasks: `setup`, `dev`, `fast`, `test`, `check`, 
 `rollback`. Tasks wrap the stack's real tools (npm scripts, make targets, uvicorn, UBT); keep
 those, add the uniform entry point. `.claude/verification.json` `fast` runs `python dev.py fast`;
 CI runs `python dev.py check`.
+Messages use `say:` / `fail:` tasks, never shell `echo` (cmd.exe treats `< > |` as redirects; found
+2026-10-11). Each repository has a smoke test that runs every non-mutating task (`--list`,
+message tasks, stubs) and checks its exit code, so a task that breaks on one OS fails in CI.
 
 ## 2. Hot reload everywhere
 
@@ -27,7 +30,7 @@ The `dev` task starts the app so saved changes appear without a manual restart o
 | Python HTTP / ASGI | in containers (Linux): `uvicorn --reload`; on Windows hosts: `python -m watchfiles --filter python "python -m uvicorn app:app" src` (uvicorn's own reload leaves the old worker serving on Windows, verified 2026-10-11) |
 | Python servers without reload (MCP stdio/HTTP, workers, bots) | `python -m watchfiles "<start command>" src` |
 | Static site generators | build watcher + local server with live reload |
-| Containers | `compose.dev.yml` override with `develop.watch` (template `templates/compose.dev.yml`): `sync` for code the app reloads itself, `sync+restart` for config, `rebuild` for dependencies; multi-stage Dockerfile with a `dev` target. Run `docker compose -f compose.yml -f compose.dev.yml up --watch`. Never bind-mount over installed dependencies. |
+| Containers | `compose.dev.yml` override with `develop.watch` (template `templates/compose.dev.yml`): `sync` for code the app reloads itself, `sync+restart` for config, `rebuild` for dependencies; multi-stage Dockerfile with a `dev` target. Run `docker compose -f compose.yml -f compose.dev.yml up --watch`. Never bind-mount over installed dependencies; reset inherited read-only mounts (`volumes: !reset []`), or watch cannot sync. Prove it by running it and changing a file: a YAML parse is not a test. |
 | Unreal C++ | Live Coding in the editor for iteration; incremental UBT builds from persistent worktrees (ops `worktree_pool`) for agents |
 | Unreal content and tuning | gameplay numbers in DataAssets / DataTables / config files, not code, so tuning needs no compile; reload them at runtime in development builds |
 | CLIs and libraries | test watch: `vitest`, or `python -m watchfiles "python -m pytest -q -x <path>" src tests` |
@@ -45,7 +48,9 @@ The `dev` task starts the app so saved changes appear without a manual restart o
 
 - Pin toolchains (`.python-version` or `requires-python`, `engines` / `.nvmrc`, engine version
   file) and commit lockfiles (`uv.lock` / `requirements*.txt` pins, `package-lock.json`).
-- `python dev.py setup` works from a clean clone, is safe to re-run, and never needs secrets.
+- `python dev.py setup` works from a clean clone, is safe to re-run, and never needs secrets. It
+  installs the repository's own dependency files (`requirements*.txt`, `pyproject.toml`,
+  `package-lock.json`), so the FAST checks see the same imports CI and production do.
 - `.env.example` lists every setting with safe development defaults; real secrets stay outside
   the repository.
 - Local dependencies (databases, search, queues) run in compose with a seed task, so development

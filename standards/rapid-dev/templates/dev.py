@@ -11,7 +11,8 @@
   python dev.py rollback  return to the previous release
 
 Edit TASKS below. A task is a list of shell commands run in order from the repository root;
-the first failure stops it. Use "@other" to run another task. Remove tasks that do not apply.
+the first failure stops it. Use "@other" to run another task, "say: text" to print a message and
+"fail: text" to print and exit 1 (messages never pass through a shell). Remove tasks that do not apply.
 "{py}" expands to the project's .venv Python (created by setup) or, before setup, this Python.
 """
 import os
@@ -25,14 +26,14 @@ VENV_PY = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 TASKS = {
     "setup": ["@venv", "{py} -m pip install -q -e .[dev]"],
-    "venv": [f"\"{sys.executable}\" -m venv .venv" if not VENV_PY.exists() else "echo .venv ok"],
+    "venv": [f"\"{sys.executable}\" -m venv .venv" if not VENV_PY.exists() else "say: .venv ok"],
     "dev": ["{py} -m watchfiles \"{py} -m app\" src"],
     "fast": ["{py} -m ruff check .", "{py} -m pytest -q -x tests/unit"],
     "test": ["{py} -m pytest -q"],
     "check": ["@fast", "@test"],
     "logs": ["docker compose logs -f --tail 200"],
-    "deploy": ["echo 'deploy: define build, release, health check and rollback for this project' && exit 1"],
-    "rollback": ["echo 'rollback: define for this project' && exit 1"],
+    "deploy": ["fail: define build, release, health check and rollback for this project"],
+    "rollback": ["fail: define for this project"],
 }
 
 
@@ -45,6 +46,11 @@ def run(name, seen=()):
     for cmd in TASKS[name]:
         if cmd.startswith("@"):
             run(cmd[1:], seen + (name,))
+            continue
+        if cmd.startswith(("say:", "fail:")):  # messages never go through a shell (cmd.exe eats < > |)
+            print(f"[{name}] {cmd.split(':', 1)[1].strip()}", flush=True)
+            if cmd.startswith("fail:"):
+                sys.exit(1)
             continue
         py = f"\"{VENV_PY}\"" if VENV_PY.exists() else f"\"{sys.executable}\""
         cmd = cmd.replace("{py}", py)

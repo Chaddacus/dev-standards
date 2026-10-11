@@ -211,8 +211,8 @@ services:
             "test": ["{py} -m pytest -q"],
             "check": ["@fast", "@test"],
             "logs": ["docker compose logs -f --tail 200"],
-            "deploy": ["echo 'deploy: build image tagged with the git SHA, release, check /healthz, roll back on failure' && exit 1"],
-            "rollback": ["echo 'rollback: re-release the previous SHA' && exit 1"],
+            "deploy": ["fail: build image tagged with the git SHA, release, check /healthz, roll back on failure"],
+            "rollback": ["fail: re-release the previous SHA"],
         }
     else:
         write(root, f"src/{pkg}/core.py", '''
@@ -238,7 +238,7 @@ def test_greet():
             "check": ["@fast", "@test"],
         }
     s = dev_py(tasks)
-    s = s.replace('    "venv": [],', '    "venv": [f"\\"{sys.executable}\\" -m venv .venv" if not VENV_PY.exists() else "echo .venv ok"],')
+    s = s.replace('    "venv": [],', '    "venv": [f"\\"{sys.executable}\\" -m venv .venv" if not VENV_PY.exists() else "say: .venv ok"],')
     write(root, "dev.py", s)
     return {"python": "3.12"}
 
@@ -261,8 +261,8 @@ def web_project(root, name):
         "fast": ["npm run lint", "npm run typecheck", "npm test"],
         "test": ["npm test"],
         "check": ["@fast", "npm run build"],
-        "deploy": ["echo 'deploy: build and publish dist/, verify, roll back on failure' && exit 1"],
-        "rollback": ["echo 'rollback: re-publish the previous build' && exit 1"],
+        "deploy": ["fail: build and publish dist/, verify, roll back on failure"],
+        "rollback": ["fail: re-publish the previous build"],
     }
     write(root, "dev.py", dev_py(tasks))
     return {"node": "24", "setup": "npm ci"}
@@ -291,6 +291,11 @@ def main():
     gi = root / ".gitignore"
     existing = gi.read_text(encoding="utf-8") if gi.exists() else ""
     write(root, ".gitignore", existing + COMMON_GITIGNORE)
+    write(root, "tests/test_dev_py.py", (TEMPLATES / "test_dev_py.py").read_text(encoding="utf-8"))
+    devpy = (root / "dev.py").read_text(encoding="utf-8")
+    smoke = "{py} tests/test_dev_py.py" if args.stack != "web" else "python tests/test_dev_py.py"
+    devpy = devpy.replace('"check": ["@fast"', f'"check": ["{smoke}", "@fast"', 1)
+    (root / "dev.py").write_text(devpy, encoding="utf-8", newline="\n")
     write(root, ".claude/verification.json", json.dumps({
         "fast": [{"name": "fast", "command": "python dev.py fast"}],
         "full": [{"name": "check", "command": "python dev.py check"}]}, indent=2) + "\n")

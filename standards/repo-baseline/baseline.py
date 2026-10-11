@@ -127,10 +127,23 @@ def audit(repo):
         "containers": containers,
         "compose_watch": compose_watch,
         "fast_checks": vcode == 0,
-        "static_checks": bool(re.search(r"ruff|flake8|pylint|mypy|pyright|eslint|tsc|typecheck|lint|clippy|golangci|vet",
-                                        fast_cmds, re.I)),
+        "static_checks": bool(re.search(STATIC_RE, fast_cmds + " " + dev_fast_tasks(repo, branch, fast_cmds), re.I)),
         "ci": any(str(f.get("name", "")).endswith((".yml", ".yaml")) for f in wf if isinstance(f, dict)),
     }
+
+
+STATIC_RE = r"ruff|flake8|pylint|mypy|pyright|eslint|tsc|typecheck|lint|clippy|golangci|vet"
+
+
+def dev_fast_tasks(repo, branch, fast_cmds):
+    """When the FAST tier is `python dev.py fast`, look inside dev.py's fast task (the standard)."""
+    if "dev.py" not in fast_cmds:
+        return ""
+    code, body, _ = gh("api", f"repos/{repo}/contents/dev.py?ref={branch}", "-H", "Accept: application/vnd.github.raw")
+    if code != 0:
+        return ""
+    m = re.search(r'"fast"\s*:\s*\[(.*?)\]', body, re.S)
+    return m.group(1) if m else ""
 
 
 COMPOSE = re.compile(r"^(docker-)?compose(\.[\w-]+)?\.ya?ml$")
