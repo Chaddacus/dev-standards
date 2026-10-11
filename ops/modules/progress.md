@@ -13,9 +13,19 @@ append-only comments.
   worker could not; then: `finished` → state `review`; `blocked` → `blocked` (or recovery when the
   blocker is not a dependency); `stuck` → recovery.
 - **block / unblock**: dependency-driven moves between `ready` and `blocked`.
-- **counters**: increment `fix_rounds` when review sends work back; increment `owner_touches`
-  when the owner had to act (answer, approval, merge); append to `attempts`
-  (`{"model","effort","result"}`) on every worker run.
+- **counters** (never rewrite them by hand; `set-record` refuses decreases):
+  - review sends work back → `ghtask.py bump <repo> <n> fix_rounds`
+  - every worker run → `ghtask.py append <repo> <n> attempts` with
+    `{"model","effort","started_at","finished_at","result"}` (+ `cost_usd` when known)
+  - every owner action → `ghtask.py append <repo> <n> owner_events` with
+    `{"type": answer|merge|review|decision|access, "cause": policy|required|access|intent|rescue,
+    "at"}`. `policy` = repository rules reserve it (owner merges); `required` = spending,
+    security, deletion, deploy approvals; `intent` = only the owner knows what they want;
+    `rescue` = the agents could not do the work. Only `rescue` (and anything unknown) lowers Au.
+- **merge and live**: when the PR merges, write `pr` (URL) and `merged_at`; for deploy repos the
+  deploy step writes `live_at` after the health check passes.
+- **close**: `done` with a merged PR, `no_change: true`, or `children` closes as completed;
+  anything else closes as not planned (it counts as dropped).
 - **checkpoint** (end of run): every task touched this run has a record matching its label; no
   task is `in-progress` without a live worker (orphans → `ready` with a note).
 

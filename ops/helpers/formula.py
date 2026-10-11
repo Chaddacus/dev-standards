@@ -1,152 +1,150 @@
 #!/usr/bin/env python3
-"""Formula v2 from GitHub (system of record for local and cloud work). Local runner; uses gh.
+"""Ops metrics v3 report (definitions: ops/METRICS.md; computation: metrics.py).
 
-  formula.py --repos owner/a owner/b [--days 30] [--json]
+  formula.py --repos owner/a owner/b [--since ISO] [--until ISO] [--json]
+             [--dump-raw FILE] [--from-json FILE]
 
-Per closed task (issue with an ops task record):
-  lead time Δ   = opened -> closed, split into stages from label timestamps:
-                  queue (opened -> first agent-in-progress), build (in-progress -> agent-review),
-                  verify (agent-review -> closed), owner wait (time carrying needs-owner)
-  points        = record size (1,2,3,5,8)
-  autonomous    = never carried needs-owner and owner_touches == 0
-  correct       = fix_rounds == 0 and no agent-regression issue references the task
-Totals:
-  E  = points of correct tasks / calendar hours in the window
-  Au = autonomous tasks / tasks       Ac = correct tasks / tasks
-  S  = points / build hours           Δ  = median lead time (and median per stage)
+Fetches from GitHub with the gh CLI (paginated), then calls the pure metrics.compute().
+--dump-raw saves the fetched data; --from-json replays it without network (for tests and
+reproducible reports). Errors per issue are collected and reported, not fatal.
 """
 import argparse
 import json
-import re
-import statistics
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-STAGE_LABELS = {"agent-in-progress", "agent-review", "needs-owner"}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import metrics  # noqa: E402
+
+OPS_LABELS = {"agent-ready", "agent-in-progress", "agent-planning", "agent-review", "needs-owner", "blocked"}
+CONFIG = Path.home() / ".claude" / "ops" / "config.json"
+
+
+class FetchError(Exception):
+    pass
+
+
+def gh_paged(path):
+    r = subprocess.run(["gh", "api", "--paginate", "--slurp", path], capture_output=True, text=True,
+                       encoding="utf-8")
+    if r.returncode != 0:
+        raise FetchError(f"{path}: {r.stderr.strip()[:200]}")
+    pages = json.loads(r.stdout or "[]")
+    return [item for page in pages for item in (page if isinstance(page, list) else [page])]
 
 
 def gh_json(*args):
     r = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8")
     if r.returncode != 0:
-        sys.exit(f"gh {' '.join(args[:3])}: {r.stderr.strip()}")
+        raise FetchError(f"{' '.join(args[:4])}: {r.stderr.strip()[:200]}")
     return json.loads(r.stdout or "null")
 
 
-def ts(s):
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
-
-
-def hours(a, b):
-    return max((b - a).total_seconds() / 3600, 0.0)
-
-
-def record_of(repo, n):
-    for c in gh_json("api", f"repos/{repo}/issues/{n}/comments?per_page=100"):
-        if "<!-- ops-task-record -->" in c["body"]:
-            m = re.search(r"```json\s*(\{.*?\})\s*```", c["body"], re.S)
-            if m:
-                return json.loads(m.group(1))
-    return None
-
-
-def label_intervals(repo, n, closed_at):
-    """{label: [(start, end), ...]} from the issue timeline."""
-    events = gh_json("api", f"repos/{repo}/issues/{n}/timeline?per_page=100",
-                     "-H", "Accept: application/vnd.github+json")
-    open_at, out = {}, {}
-    for e in events or []:
-        lab = (e.get("label") or {}).get("name")
-        if lab not in STAGE_LABELS:
+def fetch_task(repo, issue):
+    n = issue["number"]
+    comments = [{"author": (c.get("user") or {}).get("login"), "created_at": c["created_at"], "body": c.get("body") or ""}
+                for c in gh_paged(f"repos/{repo}/issues/{n}/comments?per_page=100")]
+    if not any(metrics.RECORD_MARK in c["body"] for c in comments):
+        return None
+    events = []
+    for e in gh_paged(f"repos/{repo}/issues/{n}/timeline?per_page=100"):
+        if e.get("event") in ("labeled", "unlabeled", "closed", "reopened"):
+            events.append({"event": e["event"], "label": (e.get("label") or {}).get("name"),
+                           "created_at": e["created_at"]})
+    prs = {}
+    view = gh_json("issue", "view", str(n), "-R", repo, "--json", "closedByPullRequestsReferences")
+    refs = [p.get("url") for p in (view or {}).get("closedByPullRequestsReferences") or []]
+    rec = metrics.parse_record(comments, ME)
+    if rec and rec.get("pr"):
+        refs.append(str(rec["pr"]))
+    for ref in refs:
+        if not ref:
             continue
-        if e["event"] == "labeled":
-            open_at.setdefault(lab, ts(e["created_at"]))
-        elif e["event"] == "unlabeled" and lab in open_at:
-            out.setdefault(lab, []).append((open_at.pop(lab), ts(e["created_at"])))
-    for lab, start in open_at.items():
-        out.setdefault(lab, []).append((start, closed_at))
-    return out
+        try:
+            p = gh_json("pr", "view", ref, "-R", repo, "--json", "number,url,mergedAt")
+            prs[p["number"]] = {"number": p["number"], "url": p["url"], "merged_at": p.get("mergedAt")}
+        except FetchError:
+            pass
+    return {"repo": repo, "number": n, "created_at": issue["created_at"], "closed_at": issue.get("closed_at"),
+            "state": issue["state"].upper(), "state_reason": (issue.get("state_reason") or "").upper() or None,
+            "comments": comments, "events": events, "prs": list(prs.values())}
 
 
-def regressions(repo):
-    issues = gh_json("issue", "list", "-R", repo, "--label", "agent-regression", "--state", "all",
-                     "-L", "500", "--json", "body,title") or []
-    return " ".join(i["title"] + " " + (i["body"] or "") for i in issues)
-
-
-def analyse(repos, days):
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-    tasks = []
+def fetch(repos, since):
+    raws, regs, errors = [], [], []
     for repo in repos:
-        reg_text = regressions(repo)
-        closed = gh_json("issue", "list", "-R", repo, "--state", "closed", "-L", "500",
-                         "--search", f"closed:>={since.date().isoformat()}",
-                         "--json", "number,createdAt,closedAt") or []
-        for i in closed:
-            rec = record_of(repo, i["number"])
-            if not rec:
-                continue
-            opened, closed_at = ts(i["createdAt"]), ts(i["closedAt"])
-            iv = label_intervals(repo, i["number"], closed_at)
-            prog = iv.get("agent-in-progress", [])
-            rev = iv.get("agent-review", [])
-            first_prog = min((s for s, _ in prog), default=None)
-            first_rev = min((s for s, _ in rev), default=None)
-            owner = sum(hours(s, e) for s, e in iv.get("needs-owner", []))
-            ref = re.compile(rf"(#{i['number']}\b|{re.escape(rec.get('pr') or '~none~')})")
-            tasks.append({
-                "task": f"{repo}#{i['number']}", "points": rec["size"], "kind": rec["kind"],
-                "model": rec.get("model"),
-                "lead_h": hours(opened, closed_at),
-                "queue_h": hours(opened, first_prog) if first_prog else None,
-                "build_h": sum(hours(s, e) for s, e in prog),
-                "verify_h": hours(first_rev, closed_at) if first_rev else None,
-                "owner_h": owner,
-                "autonomous": not iv.get("needs-owner") and not rec.get("owner_touches"),
-                "correct": not rec.get("fix_rounds") and not ref.search(reg_text),
-            })
-    return tasks, since
+        try:
+            issues = [i for i in gh_paged(f"repos/{repo}/issues?state=all&per_page=100&since={since}")
+                      if "pull_request" not in i]
+        except FetchError as e:
+            errors.append(str(e))
+            continue
+        for issue in issues:
+            labels = {l["name"] for l in issue.get("labels", [])}
+            if "agent-regression" in labels:
+                regs.append({"repo": repo, "number": issue["number"], "body": issue.get("body") or ""})
+            try:
+                t = fetch_task(repo, issue)
+                if t:
+                    raws.append(t)
+            except FetchError as e:
+                errors.append(f"{repo}#{issue['number']}: {e}")
+    return raws, regs, errors
 
 
-def med(xs):
-    xs = [x for x in xs if x is not None]
-    return round(statistics.median(xs), 2) if xs else None
-
-
-def summarise(tasks, since):
-    window_h = hours(since, datetime.now(timezone.utc))
-    n = len(tasks)
-    build_h = sum(t["build_h"] for t in tasks)
-    pts = sum(t["points"] for t in tasks)
-    return {
-        "tasks": n, "points": pts, "window_hours": round(window_h, 1),
-        "E_points_per_hour": round(sum(t["points"] for t in tasks if t["correct"]) / window_h, 3) if window_h else None,
-        "Au": round(sum(t["autonomous"] for t in tasks) / n, 3) if n else None,
-        "Ac": round(sum(t["correct"] for t in tasks) / n, 3) if n else None,
-        "S_points_per_build_hour": round(pts / build_h, 3) if build_h else None,
-        "delta_median_h": med(t["lead_h"] for t in tasks),
-        "stages_median_h": {k: med(t[f"{k}_h"] for t in tasks) for k in ("queue", "build", "verify", "owner")},
-    }
+def load_ctx(now):
+    cfg = json.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
+    deploy = [r for r, v in cfg.get("repos", {}).items() if v.get("deploy") in ("auto", "paused")]
+    return {"manager_login": ME, "owner_login": ME, "deploy_repos": deploy, "now": now}
 
 
 def main():
+    global ME
     a = argparse.ArgumentParser()
-    a.add_argument("--repos", nargs="+", required=True)
-    a.add_argument("--days", type=int, default=30)
+    a.add_argument("--repos", nargs="*", default=[])
+    a.add_argument("--since")
+    a.add_argument("--until")
     a.add_argument("--json", action="store_true")
+    a.add_argument("--dump-raw")
+    a.add_argument("--from-json")
     args = a.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
-    tasks, since = analyse(args.repos, args.days)
-    out = {"summary": summarise(tasks, since), "tasks": tasks}
+    now = datetime.now(timezone.utc)
+    until = args.until or now.isoformat()
+    since = args.since or (now - timedelta(days=7)).isoformat()
+    if args.from_json:
+        data = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
+        ME = data["ctx"]["manager_login"]
+        raws, regs, errors, ctx = data["raws"], data["regressions"], data.get("errors", []), data["ctx"]
+    else:
+        ME = gh_json("api", "user")["login"]
+        # Fetch issues updated since the cohort start minus the escape window, so escapes link.
+        fetch_since = (datetime.fromisoformat(since) - timedelta(days=metrics.MATURE_DAYS)).isoformat()
+        raws, regs, errors = fetch(args.repos, fetch_since)
+        ctx = load_ctx(now.isoformat())
+    if args.dump_raw:
+        Path(args.dump_raw).write_text(json.dumps({"ctx": ctx, "raws": raws, "regressions": regs, "errors": errors},
+                                                  indent=1), encoding="utf-8")
+    tasks, s = metrics.compute(raws, regs, ctx, since, until)
+    s["errors"] = errors
     if args.json:
-        print(json.dumps(out, indent=1, default=str))
+        print(json.dumps({"summary": s, "tasks": tasks}, indent=1, default=str))
         return
-    s = out["summary"]
-    print(f"{s['tasks']} tasks, {s['points']} points in the last {args.days} days")
-    print(f"E  {s['E_points_per_hour']} correct points/hour   Au {s['Au']}   Ac {s['Ac']}   "
-          f"S {s['S_points_per_build_hour']} points/build-hour")
-    print(f"Δ  median {s['delta_median_h']} h; stages (median h): {s['stages_median_h']}")
+    print(f"Cohort {since[:10]} to {until[:10]}: {s['cohort']} tasks ({s['parents']} parents excluded); outcomes {s['outcomes']}")
+    print(f"E {s['E']} FTR points per task-hour  (= Ac {s['Ac']['show']} / {s['h_per_point']} h per point)")
+    print(f"Au {s['Au']['show']} ci {s['Au']['ci95']}   owner minutes {s['owner_minutes']} {s['owner_minutes_by_cause']}")
+    print(f"Escapes {s['escape_rate']['show']} (mature), {s['escape_rate']['provisional']} still provisional")
+    print(f"Hours per point by stage {s['h_by_stage_per_point']}")
+    print(f"Lead time by size {s['lead_by_band']}   WIP {s['wip']}  oldest open {s['oldest_open_h']} h")
+    print(f"S {s['S']} ({s['S_source']})   cost per FTR point {s['cost_per_ftr_point']}   "
+          f"self-made {s['self_made_share']['show']}   record mismatches {s['record_mismatches']}")
+    if errors:
+        print(f"{len(errors)} fetch errors (first: {errors[0]})")
 
+
+ME = None
 
 if __name__ == "__main__":
     main()

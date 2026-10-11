@@ -27,5 +27,6 @@ render-update` validates it).
 
 ## Output
 
-Per launched worker: task ID, worker kind, model/effort, worktree, start time. On return: the
-worker's final update JSON, handed to progress → record.
+Per launched worker: task ID, worker kind, model/effort, worktree, start time (UTC). On return:
+the worker's final update JSON, handed to progress → record, plus the attempt
+(`{"model","effort","started_at","finished_at","result"}`) for `ghtask.py append ... attempts`.

@@ -12,12 +12,15 @@ only (see recovery); it never fixes missing access or unclear requirements.
 | Planning, architecture, ambiguous requirements, difficult diagnosis | opus | high |
 | Bounded implementation against a plan or a clear issue (size <= 3) | sonnet | medium |
 | Bounded implementation, size 5 without a plan (should be rare) | sonnet | high |
-| Review: docs, config, size <= 2, low consequence | sonnet | low |
-| Review: logic changes, size >= 3 | sonnet | medium |
-| Review: high consequence (data, deletion, auth/security, money, deploy, > ~300 lines) | opus | high, plus a Codex second opinion |
+| Review: diff under ~50 lines, docs or config, no sensitive paths | sonnet | low |
+| Review: logic changes | sonnet | medium |
+| Review: high consequence (data, deletion, auth/security, money, deploy, > ~300 lines) | opus | high, plus a second-model review (Codex, or Fable while Codex is unavailable) |
 
-Overrides: `routing` in `~/.claude/ops/config.json` (task kind → model) wins for implementation;
-the weekly improvement pass sets it from measured first-try accuracy. Fable 5.1 is on trial for
+Overrides: `routing` in `~/.claude/ops/config.json` (task kind → model) wins for implementation.
+The weekly improvement pass changes it only through `metrics.routing_decision` (ops/METRICS.md):
+20+ tasks per model within a size band, a 95% interval that clears the threshold, the same rule
+in both directions, credit to the first attempt's model, and an alternating trial before any
+switch. Review strength is chosen from the diff, never from the task's size. Fable 5.1 is on trial for
 the planning phase when the config says `"plan": "fable"`.
 
 ## Environment

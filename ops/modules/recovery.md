@@ -22,7 +22,9 @@ budget is used, escalate.
 
 ## 3. Escalate (owner)
 
-Progress → `needs-owner`, plus one comment in this format:
+Progress → `needs-owner` and an `owner_events` entry whose `cause` says why: `access`,
+`intent`, `required`, `policy`, or `rescue` (the agents could not do it). Do not label a rescue
+as anything else; honest causes are what keep Au meaningful. Plus one comment in this format:
 - **What happened:** one or two sentences with the evidence link
 - **What I tried:** the attempts (model, effort, result)
 - **Recommendation:** the next step you would take, and the alternatives

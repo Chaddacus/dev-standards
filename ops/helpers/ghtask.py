@@ -3,10 +3,15 @@
 with its GitHub tools; the rules live in taskrec.py and the progress module.
 
   ghtask.py get-record  <owner/repo> <n>            -> record JSON (or {} when none)
-  ghtask.py set-record  <owner/repo> <n> < record   -> writes the record comment and the state
-                                                       label; refuses an illegal transition
+  ghtask.py set-record  <owner/repo> <n> < record   -> validates transition and frozen fields,
+                                                       writes the record comment and state label
+  ghtask.py append      <owner/repo> <n> <field> < item   -> re-read, append to attempts or
+                                                       owner_events, write (no lost updates)
+  ghtask.py bump        <owner/repo> <n> <field>    -> re-read, +1 fix_rounds or owner_touches
   ghtask.py post-update <owner/repo> <n> < update   -> validates and appends a worker update
   ghtask.py deps        <owner/repo> <n>            -> {"open": [...]} unfinished dependencies
+
+Only records written by the manager's login count; any other "record" is ignored.
 """
 import json
 import os
@@ -17,7 +22,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TASKREC = HERE / "taskrec.py"
-STATE_LABELS = {"agent-ready", "agent-in-progress", "agent-review", "needs-owner", "blocked"}
+sys.path.insert(0, str(HERE))
+import metrics  # noqa: E402
+
+STATE_LABELS = {"agent-ready", "agent-in-progress", "agent-planning", "agent-review", "needs-owner", "blocked"}
+_ME = None
 
 
 def gh(*args, input=None):
@@ -25,6 +34,13 @@ def gh(*args, input=None):
     if r.returncode != 0:
         sys.exit(f"gh {' '.join(args[:3])}: {r.stderr.strip()}")
     return r.stdout
+
+
+def me():
+    global _ME
+    if _ME is None:
+        _ME = json.loads(gh("api", "user"))["login"]
+    return _ME
 
 
 def helper(cmd, payload):
@@ -36,14 +52,18 @@ def helper(cmd, payload):
 
 
 def comments(repo, n):
-    return json.loads(gh("api", f"repos/{repo}/issues/{n}/comments?per_page=100"))
+    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/issues/{n}/comments?per_page=100") or "[]")
+    return [c for page in pages for c in page]
 
 
 def record_comment(repo, n):
+    found = None
     for c in comments(repo, n):
-        if "<!-- ops-task-record -->" in c["body"]:
-            return c
-    return None
+        body = c.get("body") or ""
+        if ((c.get("user") or {}).get("login") == me() and metrics.RECORD_MARK in body
+                and body.lstrip().startswith("**Task record**")):
+            found = c
+    return found
 
 
 def get_record(repo, n):
@@ -51,10 +71,11 @@ def get_record(repo, n):
     return json.loads(helper("parse-record", c["body"])) if c else {}
 
 
-def set_record(repo, n, record):
-    old = get_record(repo, n)
-    if old and old.get("state") != record["state"]:
-        helper("transition", json.dumps({"from": old["state"], "to": record["state"]}))
+def write_record(repo, n, record, old):
+    if old:
+        helper("check-update", json.dumps({"old": old, "new": record}))
+    helper("transition", json.dumps({"from": old.get("state", "new"), "to": record["state"]})) \
+        if old.get("state", "new") != record["state"] else None
     body = helper("render-record", json.dumps(record))
     c = record_comment(repo, n)
     if c:
@@ -63,13 +84,37 @@ def set_record(repo, n, record):
         gh("api", "-X", "POST", f"repos/{repo}/issues/{n}/comments", "-f", f"body={body}")
     want = helper("label", json.dumps({"state": record["state"]}))
     have = {l["name"] for l in json.loads(gh("api", f"repos/{repo}/issues/{n}"))["labels"]}
+    if want and want not in have:  # add first, then remove: never a moment without a state label
+        gh("api", "-X", "POST", f"repos/{repo}/issues/{n}/labels", "-f", f"labels[]={want}")
     for label in (have & STATE_LABELS) - {want}:
         gh("api", "-X", "DELETE", f"repos/{repo}/issues/{n}/labels/{label}")
-    if want and want not in have:
-        gh("api", "-X", "POST", f"repos/{repo}/issues/{n}/labels", "-f", f"labels[]={want}")
     if record["state"] == "done":
-        gh("issue", "close", str(n), "-R", repo)
+        shipped = record.get("pr") or record.get("no_change") or record.get("children")
+        gh("issue", "close", str(n), "-R", repo, "--reason", "completed" if shipped else "not planned")
     print(json.dumps({"ok": True, "state": record["state"], "label": want}))
+
+
+def set_record(repo, n, record):
+    write_record(repo, n, record, get_record(repo, n))
+
+
+def append(repo, n, field, item):
+    if field not in ("attempts", "owner_events"):
+        sys.exit("append: field must be attempts or owner_events")
+    old = get_record(repo, n)
+    if not old:
+        sys.exit("append: no record yet")
+    new = dict(old, **{field: list(old.get(field) or []) + [item]})
+    write_record(repo, n, new, old)
+
+
+def bump(repo, n, field):
+    if field not in ("fix_rounds", "owner_touches"):
+        sys.exit("bump: field must be fix_rounds or owner_touches")
+    old = get_record(repo, n)
+    if not old:
+        sys.exit("bump: no record yet")
+    write_record(repo, n, dict(old, **{field: (old.get(field) or 0) + 1}), old)
 
 
 def post_update(repo, n, update):
@@ -82,25 +127,25 @@ def deps(repo, n):
     rec = get_record(repo, n)
     open_deps = []
     for d in rec.get("depends_on") or []:
-        m = re.fullmatch(r"(?:([\w.-]+/[\w.-]+))?#(\d+)", d.strip())
-        if not m:
-            continue
-        r2 = m.group(1) or repo
-        state = json.loads(gh("api", f"repos/{r2}/issues/{m.group(2)}"))["state"]
-        if state != "closed":
-            open_deps.append(f"{r2}#{m.group(2)}")
+        ref = metrics.norm_id(d, repo)
+        if ref and json.loads(gh("api", f"repos/{ref[0]}/issues/{ref[1]}"))["state"] != "closed":
+            open_deps.append(f"{ref[0]}#{ref[1]}")
     print(json.dumps({"open": open_deps}))
 
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    if len(sys.argv) != 4:
+    if len(sys.argv) < 4:
         sys.exit(__doc__)
     cmd, repo, n = sys.argv[1], sys.argv[2], sys.argv[3]
     if cmd == "get-record":
         print(json.dumps(get_record(repo, n), indent=2))
     elif cmd == "set-record":
         set_record(repo, n, json.loads(sys.stdin.read()))
+    elif cmd == "append" and len(sys.argv) == 5:
+        append(repo, n, sys.argv[4], json.loads(sys.stdin.read()))
+    elif cmd == "bump" and len(sys.argv) == 5:
+        bump(repo, n, sys.argv[4])
     elif cmd == "post-update":
         post_update(repo, n, json.loads(sys.stdin.read()))
     elif cmd == "deps":

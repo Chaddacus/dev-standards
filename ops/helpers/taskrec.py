@@ -12,6 +12,7 @@ Commands (JSON on stdin, text on stdout; exit 1 with the reason on invalid input
   parse-update       comment markdown      -> worker update JSON
   render-assignment  {"record":..,"worktree":..,"merge":..,"repo":..} -> assignment text
   transition         {"from": state, "to": state} -> "ok" | reason (exit 1)
+  check-update       {"old": record, "new": record} -> "ok" | reason (frozen size, counters only grow)
   label              {"state": state}      -> the GitHub label for that state ("" for done)
 """
 import json
@@ -23,14 +24,14 @@ UPDATE_MARK = "<!-- ops-update -->"
 WORKER_MARK = "<!-- ops-worker -->"
 
 STATES = ["new", "ready", "planning", "blocked", "in-progress", "review", "needs-owner", "done"]
-LABELS = {"ready": "agent-ready", "planning": "agent-in-progress", "blocked": "blocked",
+LABELS = {"ready": "agent-ready", "planning": "agent-planning", "blocked": "blocked",
           "in-progress": "agent-in-progress", "review": "agent-review",
           "needs-owner": "needs-owner", "new": "", "done": ""}
 TRANSITIONS = {
     "new": {"ready", "needs-owner", "planning"},
     "ready": {"planning", "blocked", "in-progress", "needs-owner"},
     "planning": {"ready", "blocked", "needs-owner"},
-    "blocked": {"ready", "needs-owner"},
+    "blocked": {"ready", "needs-owner", "done"},  # done: a parent whose sub-tasks all finished
     "in-progress": {"review", "ready", "blocked", "needs-owner"},
     "review": {"done", "in-progress", "needs-owner"},
     "needs-owner": {"ready", "new", "done"},
@@ -43,7 +44,12 @@ UPDATE_STATUS = {"started", "milestone", "blocked", "finished", "stuck"}
 RECORD_REQUIRED = {"task": str, "kind": str, "size": int, "state": str, "done_when": list}
 RECORD_OPTIONAL = {"plan": str, "depends_on": list, "parent": str, "model": str, "effort": str,
                    "routing_reason": str, "fix_rounds": int, "attempts": list, "owner_touches": int,
-                   "pr": str, "notes": str}
+                   "pr": str, "notes": str, "size_at_triage": int, "origin": str, "caused_by": str,
+                   "no_change": bool, "merged_at": str, "live_at": str, "owner_events": list,
+                   "children": list}
+ORIGINS = {"owner", "system", "monitor", "regression-fix"}
+OWNER_CAUSES = {"policy", "required", "access", "intent", "rescue", "unknown"}
+ATTEMPT_KEYS = {"model", "effort", "started_at", "finished_at", "result", "cost_usd", "tokens"}
 UPDATE_REQUIRED = {"task": str, "status": str, "completed": str, "next": str}
 UPDATE_OPTIONAL = {"blocker": str, "links": list, "tests": str, "model": str}
 
@@ -80,7 +86,30 @@ def validate_record(r):
         fail("record: done_when needs 1-8 non-empty criteria")
     if r.get("model") and not r.get("routing_reason"):
         fail("record: a routed task needs routing_reason (why this model and effort)")
+    if r.get("size_at_triage") is not None and r["size_at_triage"] not in SIZES:
+        fail(f"record: size_at_triage must be one of {sorted(SIZES)}")
+    if r.get("origin") and r["origin"] not in ORIGINS:
+        fail(f"record: origin must be one of {sorted(ORIGINS)}")
+    for o in r.get("owner_events") or []:
+        if not isinstance(o, dict) or o.get("cause") not in OWNER_CAUSES or not o.get("type"):
+            fail(f"record: owner_events need type and cause in {sorted(OWNER_CAUSES)}")
+    for a in r.get("attempts") or []:
+        if not isinstance(a, dict) or not a.get("model") or set(a) - ATTEMPT_KEYS:
+            fail(f"record: attempts are objects with model and only {sorted(ATTEMPT_KEYS)}")
     return r
+
+
+def check_update(old, new):
+    """Frozen and monotonic fields: what a record rewrite may not do."""
+    if old.get("size_at_triage") is not None and new.get("size_at_triage") != old["size_at_triage"]:
+        fail("record: size_at_triage is frozen after triage")
+    for k in ("fix_rounds", "owner_touches"):
+        if (new.get(k) or 0) < (old.get(k) or 0):
+            fail(f"record: {k} cannot decrease")
+    for k in ("attempts", "owner_events"):
+        if len(new.get(k) or []) < len(old.get(k) or []):
+            fail(f"record: {k} cannot shrink")
+    return "ok"
 
 
 def validate_update(u):
@@ -170,6 +199,9 @@ def main():
         print(json.dumps(validate_update(parse_block(data, UPDATE_MARK, "update")), indent=2))
     elif cmd == "render-assignment":
         print(render_assignment(json.loads(data)))
+    elif cmd == "check-update":
+        d = json.loads(data)
+        print(check_update(d["old"], d["new"]))
     elif cmd == "transition":
         t = json.loads(data)
         if t["to"] not in TRANSITIONS.get(t["from"], set()):

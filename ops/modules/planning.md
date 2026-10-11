@@ -19,6 +19,14 @@ Done by one `reader` agent (Haiku, effort low) for a batch of issues. For each i
 Output: a task record proposal per issue (`taskrec.py` schema) with state `ready` (or `planning`
 when `needs_plan`), or a question for recovery → escalate, or skip.
 
+Every new record also sets (ops/METRICS.md):
+- `size_at_triage` = size. It is frozen: later re-sizing goes in `notes`, never in this field.
+  Size never chooses review strength (the review module decides from the diff).
+- `origin`: `owner` for issues the owner wrote; `system` for issues agents filed (sub-tasks,
+  baseline gaps, flaky tests); `monitor` for live-monitor issues; `regression-fix` for fixes of
+  an agent-caused bug (0 points).
+- A skip still gets a short comment with the reason, so the digest can list skips.
+
 ## plan (state `planning`)
 
 Done by one planning agent: model and effort from the routing module, phase `plan` (Opus by
@@ -31,8 +39,9 @@ default). Inputs: the issue, the repository's SPEC / AGENTS.md / CLAUDE.md, rele
 - the split: bounded sub-tasks of size <= 3, each with its own `done_when`, in dependency order
 
 Then create one issue per sub-task (title, `done_when`, `parent: <this task>`, `depends_on`), each
-entering at `ready`. The parent's record gets `plan: <comment link>` and moves to `blocked` on its
-sub-tasks; it closes after the last one passes review.
+entering at `ready` with `origin: system`. The parent's record gets `plan: <comment link>`,
+`children: [...]`, and moves to `blocked`; when every child is done it moves `blocked → done`
+(closed as completed). Only children carry points.
 
 Output: plan comment link, list of created sub-task issues, parent record update.
 

@@ -54,6 +54,21 @@ def test_assignment_mentions_update_protocol():
     assert code == 0 and "do not merge" in text and "PR previews publish" in text
 
 
+def test_v3_fields_and_frozen_counters():
+    rec = {**RECORD, "size_at_triage": 3, "origin": "owner",
+           "attempts": [{"model": "sonnet", "started_at": "2026-10-11T10:00:00Z", "finished_at": "2026-10-11T10:40:00Z"}],
+           "owner_events": [{"type": "merge", "cause": "policy"}]}
+    assert run("render-record", rec)[0] == 0
+    assert run("render-record", {**rec, "origin": "aliens"})[0] == 1
+    assert run("render-record", {**rec, "owner_events": [{"type": "merge"}]})[0] == 1
+    assert run("check-update", {"old": rec, "new": {**rec, "size_at_triage": 5}})[0] == 1
+    assert run("check-update", {"old": {**rec, "fix_rounds": 1}, "new": {**rec, "fix_rounds": 0}})[0] == 1
+    assert run("check-update", {"old": rec, "new": {**rec, "attempts": []}})[0] == 1
+    assert run("check-update", {"old": rec, "new": {**rec, "fix_rounds": 1}}) == (0, "ok")
+    assert run("label", {"state": "planning"})[1] == "agent-planning"
+    assert run("transition", {"from": "blocked", "to": "done"}) == (0, "ok")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
