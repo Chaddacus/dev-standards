@@ -85,7 +85,9 @@ above the recorded events adds unknown events. Every manager comment therefore g
 Missing data never counts as success. Agents act as `chaddacus-agent` (since 2026-10-12), so in
 local-runner repositories records come from that account and any comment by the owner's account
 is an owner action. Cloud-runner repositories still share the owner's login there; the worker
-marker tells them apart. The digest reports record-vs-derived mismatches.
+marker tells them apart. Records the owner's account wrote before that switch still count: the
+ops config lists them in `legacy_manager_logins` (`login`, `until`), and `metrics.is_manager_record`
+judges the comment's creation time, not its last edit. The digest reports record-vs-derived mismatches.
 
 ## Decisions from the numbers
 

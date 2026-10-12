@@ -12,4 +12,4 @@ jobs:
       python-version: "3.12"
       dependency-cache: false
       setup-command: "true"
-      check-command: python ops/helpers/test_taskrec.py && python ops/helpers/test_metrics.py && python -m py_compile ops/helpers/ghtask.py ops/helpers/formula.py ops/helpers/e2e_sandbox.py
+      check-command: python ops/helpers/test_taskrec.py && python ops/helpers/test_metrics.py && python ops/helpers/test_ghtask.py && python -m py_compile ops/helpers/ghtask.py ops/helpers/formula.py ops/helpers/e2e_sandbox.py
