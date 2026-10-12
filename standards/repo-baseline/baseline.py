@@ -288,8 +288,27 @@ def cmd_audit(a, do_apply=False):
     save(CACHE, cache)
 
 
+def check_names(repo):
+    """Check names that have run recently: the default branch's latest commit plus the jobs of the
+    last few workflow runs (pull-request-only checks never run on the default branch)."""
+    names = set()
+    code, out, _ = gh("api", f"repos/{repo}/commits/HEAD/check-runs", "--jq", ".check_runs[].name")
+    names |= set(out.splitlines()) if code == 0 else set()
+    code, out, _ = gh("api", f"repos/{repo}/actions/runs?per_page=5", "--jq", ".workflow_runs[].id")
+    for run_id in (out.splitlines() if code == 0 else []):
+        code, jobs, _ = gh("api", f"repos/{repo}/actions/runs/{run_id}/jobs", "--jq", ".jobs[].name")
+        names |= set(jobs.splitlines()) if code == 0 else set()
+    return names - {""}
+
+
 def cmd_protect(a):
     repo = targets(a)[0]
+    seen = check_names(repo)
+    missing = [c for c in a.check if c not in seen]
+    if missing:  # a required check that never reports blocks every pull request (2026-10-12)
+        print(f"{repo}: not protected; no check named {missing} ran recently. "
+              f"Names that ran: {sorted(seen) or 'none'}")
+        sys.exit(1)
     body = {"name": "baseline-require-ci", "target": "branch", "enforcement": "active",
             "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
             "rules": [
