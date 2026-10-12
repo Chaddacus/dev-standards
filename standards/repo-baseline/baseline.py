@@ -40,8 +40,21 @@ LABELS = [
 ACTIONS_APP_ID = 15368
 
 
+def owner_env():
+    """Admin work (rulesets, labels, audits across every repo) runs as the owner, not the agent."""
+    try:
+        cfg = json.loads((Path.home() / ".claude" / "ops" / "config.json").read_text(encoding="utf-8"))
+        d = cfg.get("owner_gh_config_dir")
+    except Exception:
+        d = None
+    env = dict(os.environ)
+    if d:
+        env["GH_CONFIG_DIR"] = d
+    return env
+
+
 def gh(*args, input=None):
-    r = subprocess.run(["gh", *args], capture_output=True, text=True, input=input, timeout=60,
+    r = subprocess.run(["gh", *args], capture_output=True, text=True, input=input, timeout=60, env=owner_env(),
                        encoding="utf-8")
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 

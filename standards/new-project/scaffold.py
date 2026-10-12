@@ -321,7 +321,16 @@ framework and I/O code stays thin.
     sh("git init -q -b main && git add -A && git commit -q -m \"Scaffold from the rapid-dev standard\"", cwd=root)
     if args.create:
         vis = "--public" if args.public else "--private"
-        sh(f"gh repo create {args.owner}/{args.name} {vis} --source . --push", cwd=root)
+        owner_dir = json.loads((Path.home() / ".claude/ops/config.json").read_text(encoding="utf-8")).get(
+            "owner_gh_config_dir")
+        prefix = f'GH_CONFIG_DIR="{owner_dir}" ' if owner_dir else ""
+        sh(f"{prefix}gh repo create {args.owner}/{args.name} {vis} --source . --push", cwd=root)
+        agent = json.loads((Path.home() / ".claude/ops/config.json").read_text(encoding="utf-8")).get("agent_login")
+        if agent:  # the agent works in every new project with write access, never admin
+            sh(f"{prefix}gh api -X PUT repos/{args.owner}/{args.name}/collaborators/{agent} -f permission=push",
+               cwd=root, check=False)
+            sh(f"gh api user/repository_invitations --jq '.[].id' > .inv && for i in $(cat .inv); do "
+               f"gh api -X PATCH user/repository_invitations/$i; done; rm -f .inv", cwd=root, check=False)
         sh(f"python \"{BASELINE}\" apply --repo {args.owner}/{args.name}", cwd=root, check=False)
     print(root)
 
