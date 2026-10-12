@@ -222,7 +222,9 @@ def gaps(state):
         g.append("FAST tier has no linter or type checker (add ruff/pyright, tsc/eslint, or the stack's equivalent)")
     if not state.get("dev_py", True) and not state["empty"]:
         g.append("rapid-dev: no dev.py standard task runner (setup/dev/fast/test/check/logs/deploy/rollback)")
-    if state.get("containers") and not state.get("compose_watch", True):
+    exempt = load(Path.home() / ".claude" / "ops" / "config.json", {}).get("repos", {}).get(
+        state["repo"], {}).get("compose_watch", "")
+    if state.get("containers") and not state.get("compose_watch", True) and not str(exempt).startswith("exempt"):
         g.append("rapid-dev: containers without a hot-reload compose override (develop.watch)")
     if not state["ci"]:
         g.append("no CI workflow")
