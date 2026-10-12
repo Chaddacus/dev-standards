@@ -104,6 +104,15 @@ def test_owner_record_after_the_cutoff_is_ignored():
         assert ghtask.get_record(REPO, N) == {}
 
 
+def test_append_and_bump_on_a_legacy_record_post_a_new_comment():
+    for run in (lambda: ghtask.bump(REPO, N, "fix_rounds"),
+                lambda: ghtask.append(REPO, N, "attempts", {"model": "sonnet", "result": "finished"})):
+        with world([rec_comment(11, OWNER, BEFORE, "in-progress")], LEGACY) as fake:
+            run()
+            assert fake.patched == []  # the API refuses edits of the owner's comment, so never try
+            assert len(fake.posted) == 1 and '"state": "in-progress"' in fake.posted[0][1]
+
+
 def test_works_without_a_config_file_or_with_a_broken_one():
     legacy_comment = [rec_comment(11, OWNER, BEFORE, "review")]
     for mode in ("missing", "junk"):
