@@ -2,6 +2,13 @@
 
 Turns a routed `ready` task into a worker assignment and runs the worker lifecycle.
 
+## Order
+
+Take ready tasks in this order: `CI failing on` issues; then the repo's `focus` issues from
+`~/.claude/ops/config.json` and their sub-tasks; then the rest, oldest first. Never start an
+issue listed under the repo's `hold` while its `until_closed` issue is open; keep it `ready`
+(or `blocked` with that dependency) and move on.
+
 ## assign
 
 1. Check dependencies (`ghtask.py deps`, or the cloud equivalent). Any open → progress → block.
