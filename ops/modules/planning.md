@@ -53,3 +53,6 @@ Output: plan comment link, list of created sub-task issues, parent record update
 - A plan that changes another repository's interface also creates the consumer task there
   (contract first; see the rapid-dev standard, section 6).
 - Planning does not change project scope; anything beyond the issue becomes a question.
+- How to slice work (one PR or several, which part first) is never an owner question: small
+  batches are the standing rule, so ship the smallest valuable slice first and file the rest as
+  issues. Only the meaning of an unclear item is a question, and only when that item is reached.
