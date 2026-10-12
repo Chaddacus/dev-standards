@@ -82,9 +82,10 @@ count; owner comments without the worker marker, between acceptance and the task
 owner events of unknown cause unless a recorded owner event lies within 6 hours; `owner_touches`
 above the recorded events adds unknown events. Every manager comment therefore goes through
 `ghtask.py comment` (or ends with the marker in the cloud).
-Missing data never counts as success. Until agents have their own GitHub identity, owner and
-agent actions share one login, and derivation relies on the worker marker; the digest reports
-record-vs-derived mismatches.
+Missing data never counts as success. Agents act as `chaddacus-agent` (since 2026-10-12), so in
+local-runner repositories records come from that account and any comment by the owner's account
+is an owner action. Cloud-runner repositories still share the owner's login there; the worker
+marker tells them apart. The digest reports record-vs-derived mismatches.
 
 ## Decisions from the numbers
 
