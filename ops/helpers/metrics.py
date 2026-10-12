@@ -10,7 +10,8 @@ Raw task shape:
                "created_at": iso}],
    "prs": [{"number": 12, "url": str, "merged_at": iso | None}]}
 Regression shape: {"repo", "number", "created_at", "body"}
-Context: {"manager_login": str, "owner_login": str, "deploy_repos": [..], "now": iso}
+Context: {"manager_login": str, "manager_login_by_repo": {repo: login}, "owner_login": str,
+          "deploy_repos": [..], "now": iso}
 """
 import json
 import math
@@ -339,8 +340,9 @@ def compute(raw_tasks, regressions, ctx, since, until):
     s, u = ts(since), ts(until)
     recs = {}
     for raw in raw_tasks:
+        login = ctx.get("manager_login_by_repo", {}).get(raw["repo"], ctx["manager_login"])
         try:
-            rec = parse_record(raw.get("comments", []), ctx["manager_login"])
+            rec = parse_record(raw.get("comments", []), login)
         except Exception:  # noqa: BLE001 - a bad record must not stop the report
             rec = None
         if rec:

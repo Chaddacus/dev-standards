@@ -1,0 +1,13 @@
+# Measurement and safety definitions: changes need the owner's review (ops/METRICS.md).
+# The agent account (chaddacus-agent) has write access only and cannot approve its own changes.
+/ops/METRICS.md            @Chaddacus
+/ops/SPINE.md              @Chaddacus
+/ops/helpers/              @Chaddacus
+/ops/modules/planning.md   @Chaddacus
+/ops/modules/review.md     @Chaddacus
+/ops/modules/recovery.md   @Chaddacus
+/ops/modules/progress.md   @Chaddacus
+/ops/modules/routing.md    @Chaddacus
+/OPS-CLOUD.md              @Chaddacus
+/standards/agents/         @Chaddacus
+/.github/CODEOWNERS        @Chaddacus

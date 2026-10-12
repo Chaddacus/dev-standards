@@ -56,7 +56,7 @@ def fetch_task(repo, issue):
     prs = {}
     view = gh_json("issue", "view", str(n), "-R", repo, "--json", "closedByPullRequestsReferences")
     refs = [p.get("url") for p in (view or {}).get("closedByPullRequestsReferences") or []]
-    rec = metrics.parse_record(comments, ME)
+    rec = metrics.parse_record(comments, CTX_FOR_FETCH["manager_login_by_repo"].get(repo, CTX_FOR_FETCH["manager_login"]))
     if rec and rec.get("pr"):
         refs.append(str(rec["pr"]))
     for ref in refs:
@@ -99,7 +99,13 @@ def fetch(repos, since):
 def load_ctx(now):
     cfg = json.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
     deploy = [r for r, v in cfg.get("repos", {}).items() if v.get("deploy") == "auto"]  # paused = not deploying
-    return {"manager_login": ME, "owner_login": ME, "deploy_repos": deploy, "now": now}
+    owner = cfg.get("owner_login") or ME
+    agent = cfg.get("agent_login") or ME
+    # The cloud runner still acts through the owner's account: there, records are the owner's and
+    # owner actions are told apart by the worker marker only.
+    by_repo = {r: owner for r, v in cfg.get("repos", {}).items() if v.get("runner") == "cloud"}
+    return {"manager_login": agent, "manager_login_by_repo": by_repo, "owner_login": owner,
+            "deploy_repos": deploy, "now": now}
 
 
 def main():
@@ -124,6 +130,7 @@ def main():
         raws, regs, errors, ctx = data["raws"], data["regressions"], data.get("errors", []), data["ctx"]
     else:
         ME = gh_json("api", "user")["login"]
+        CTX_FOR_FETCH.update(load_ctx(now.isoformat()))
         # Fetch issues updated since the cohort start minus the escape window, so escapes link.
         fetch_since = (datetime.fromisoformat(since) - timedelta(days=metrics.MATURE_DAYS)).isoformat()
         raws, regs, errors = fetch(args.repos, fetch_since)
@@ -154,6 +161,7 @@ def main():
 
 
 ME = None
+CTX_FOR_FETCH = {"manager_login": None, "manager_login_by_repo": {}}
 
 if __name__ == "__main__":
     main()

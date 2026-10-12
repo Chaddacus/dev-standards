@@ -16,7 +16,7 @@ task records, and which helpers you can execute.
 
 ## Loop (one run)
 
-1. **Understand.** Load the queue for your runner. Skip issues not authored by the owner.
+1. **Understand.** Load the queue for your runner. Skip issues not authored by the owner (`Chaddacus`) or the agent account (`chaddacus-agent`).
 2. **For each task, pick the next step from its state** (state = task record `state`; an issue
    with no record is `new`):
 

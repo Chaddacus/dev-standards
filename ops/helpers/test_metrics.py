@@ -393,6 +393,20 @@ def test_acceptance_uses_earliest_record():
     assert [t["task"] for t in tasks] == ["o/r#230"]
 
 
+def test_manager_login_per_repo():
+    # Local repos: records come from the agent account; a record by the owner's account is ignored.
+    # Cloud repos still act as the owner, so there the owner's records count.
+    ctx = dict(CTX, manager_login="agent-bot", manager_login_by_repo={"o/cloud": OWNER})
+    local = task(250, merged=2, closed=2)  # record authored by OWNER ("Chaddacus")
+    cloud = task(251, merged=2, closed=2, repo="o/cloud")
+    tasks, _ = M.compute([local, cloud], [], ctx, SINCE, UNTIL)
+    assert [t["task"] for t in tasks] == ["o/cloud#251"]
+    bot = task(252, merged=2, closed=2)
+    bot["comments"][0]["author"] = "agent-bot"
+    tasks, _ = M.compute([bot], [], ctx, SINCE, UNTIL)
+    assert [t["task"] for t in tasks] == ["o/r#252"] and tasks[0]["autonomous"] is True
+
+
 def test_routing_table_counts_tasks():
     _, s = run([task(240 + i, merged=2, closed=2) for i in range(3)])
     assert s["routing_table"]["M"]["sonnet"] == {"model": "sonnet", "k": 3, "n": 3}
