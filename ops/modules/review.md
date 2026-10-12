@@ -21,7 +21,9 @@ Turns a worker's "finished" into evidence-backed done, or sends it back. Runs on
 ## Outcomes
 
 - `PASS` and integration OK → merge per the merge rule: `gh pr merge --auto --squash
-  --delete-branch` (or `pr-ready` + owner merge where the repository reserves it) → progress →
+  --delete-branch` (or `pr-ready` + owner merge where the repository reserves it; a repo's
+  `tuning_merge` in the ops config lets the agent merge a PR its check marks tuning-only, once
+  that entry's `needs` are met) → progress →
   `done` once merged. Deploy-on-merge repositories deploy afterwards (local runner).
 - `FAIL` → progress: `bump fix_rounds`, state `in-progress`, findings sent to the same worker
   (one more round). A second `FAIL` → recovery.
