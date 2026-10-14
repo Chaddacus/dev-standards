@@ -10,10 +10,12 @@ baseline. Prints the project path.
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -22,9 +24,11 @@ BASELINE = HERE.parent / "repo-baseline" / "baseline.py"
 SHARED_CI = "Chaddacus/dev-standards/.github/workflows/check.yml@v1"
 
 
-def sh(cmd, cwd, check=True):
+def sh(cmd, cwd, check=True, env=None):
+    """Run a shell command. Pass extra variables through env, never as a `VAR=x cmd` prefix
+    (that form fails in cmd.exe, the Windows shell)."""
     print(f"$ {cmd}", flush=True)
-    r = subprocess.run(cmd, shell=True, cwd=cwd)
+    r = subprocess.run(cmd, shell=True, cwd=cwd, env={**os.environ, **env} if env else None)
     if check and r.returncode != 0:
         sys.exit(f"failed: {cmd}")
     return r.returncode
@@ -113,7 +117,8 @@ dist/
 
 def python_project(root, name, pkg, service):
     deps = '["starlette>=0.47", "uvicorn>=0.35"]' if service else "[]"
-    dev = '["pytest>=8", "ruff>=0.15", "watchfiles>=1.1"' + (', "httpx>=0.28"' if service else "") + "]"
+    # ruff pinned exactly: rule sets change between releases, so a range lets local and CI disagree
+    dev = '["pytest>=8", "ruff==0.17.0", "watchfiles>=1.1"' + (', "httpx>=0.28"' if service else "") + "]"
     write(root, "pyproject.toml", f"""
 [project]
 name = "{name}"
@@ -134,6 +139,10 @@ packages = ["src/{pkg}"]
 [tool.ruff]
 line-length = 110
 src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Windows git cannot track the executable bit, so EXE001 fails on Linux CI for new shebang scripts.
+extend-ignore = ["EXE001"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
@@ -291,6 +300,11 @@ def main():
     gi = root / ".gitignore"
     existing = gi.read_text(encoding="utf-8") if gi.exists() else ""
     write(root, ".gitignore", existing + COMMON_GITIGNORE)
+    # LF everywhere: Windows checkouts with core.autocrlf=true otherwise change file bytes, which breaks
+    # content hashes, golden files and shebangs (history-toons, 2026-10-14)
+    if not (root / ".gitattributes").exists():
+        write(root, ".gitattributes", "* text=auto eol=lf\n*.png binary\n*.jpg binary\n*.wav binary\n"
+              "*.mp3 binary\n*.mp4 binary\n*.zip binary\n")
     write(root, "tests/test_dev_py.py", (TEMPLATES / "test_dev_py.py").read_text(encoding="utf-8"))
     devpy = (root / "dev.py").read_text(encoding="utf-8")
     smoke = "{py} tests/test_dev_py.py" if args.stack != "web" else "python tests/test_dev_py.py"
@@ -316,21 +330,43 @@ Layout: logic in plain modules with unit tests under `tests/unit` (Python) or `*
 framework and I/O code stays thin.
 """)
     write(root, "README.md", f"# {args.name}\n\nSee CLAUDE.md for commands.\n")
+    # Official CloudWarriors Task issue form, fetched so every new repository uses the current version
+    tmpl = subprocess.run("gh api repos/CloudWarriors-ai/.github/contents/.github/ISSUE_TEMPLATE/task.yml "
+                          "-H \"Accept: application/vnd.github.raw\"", shell=True, capture_output=True)
+    if tmpl.returncode == 0 and tmpl.stdout.startswith(b"name: Task"):
+        p = root / ".github/ISSUE_TEMPLATE/task.yml"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(tmpl.stdout)
+    else:
+        print("WARNING: could not fetch the CloudWarriors Task issue template; add it later", flush=True)
     sh("python dev.py setup", cwd=root)
     sh("python dev.py check", cwd=root)
-    sh("git init -q -b main && git add -A && git commit -q -m \"Scaffold from the rapid-dev standard\"", cwd=root)
+    # dev.py has a shebang; Windows checkouts lose the executable bit and ruff EXE001 fails on Linux CI
+    sh("git init -q -b main && git add -A && git update-index --chmod=+x dev.py && "
+       "git commit -q -m \"Scaffold from the rapid-dev standard\"", cwd=root)
     if args.create:
         vis = "--public" if args.public else "--private"
         owner_dir = json.loads((Path.home() / ".claude/ops/config.json").read_text(encoding="utf-8")).get(
             "owner_gh_config_dir")
-        prefix = f'GH_CONFIG_DIR="{owner_dir}" ' if owner_dir else ""
-        sh(f"{prefix}gh repo create {args.owner}/{args.name} {vis} --source . --push", cwd=root)
+        owner_env = {"GH_CONFIG_DIR": owner_dir} if owner_dir else None
+        sh(f"gh repo create {args.owner}/{args.name} {vis} --source . --push", cwd=root, env=owner_env)
         agent = json.loads((Path.home() / ".claude/ops/config.json").read_text(encoding="utf-8")).get("agent_login")
         if agent:  # the agent works in every new project with write access, never admin
-            sh(f"{prefix}gh api -X PUT repos/{args.owner}/{args.name}/collaborators/{agent} -f permission=push",
-               cwd=root, check=False)
-            sh(f"gh api user/repository_invitations --jq '.[].id' > .inv && for i in $(cat .inv); do "
-               f"gh api -X PATCH user/repository_invitations/$i; done; rm -f .inv", cwd=root, check=False)
+            sh(f"gh api -X PUT repos/{args.owner}/{args.name}/collaborators/{agent} -f permission=push",
+               cwd=root, check=False, env=owner_env)
+            # accept as the agent (default gh login); the invite can take a few seconds to appear
+            for _ in range(6):
+                invites = subprocess.run("gh api user/repository_invitations --jq .[].id", shell=True, cwd=root,
+                                         capture_output=True, text=True).stdout.split()
+                for inv in invites:
+                    sh(f"gh api -X PATCH user/repository_invitations/{inv}", cwd=root, check=False)
+                push = subprocess.run(f"gh api repos/{args.owner}/{args.name} --jq .permissions.push", shell=True,
+                                      cwd=root, capture_output=True, text=True).stdout.strip()
+                if push == "true":
+                    break
+                time.sleep(5)
+            else:
+                print(f"WARNING: {agent} has no push access yet; accept the invite before pushing")
         sh(f"python \"{BASELINE}\" apply --repo {args.owner}/{args.name}", cwd=root, check=False)
     print(root)
 
