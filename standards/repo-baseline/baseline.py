@@ -36,6 +36,7 @@ LABELS = [
     ("agent-review", "5319E7", "Work finished; the manager is reviewing it before done"),
     ("blocked", "000000", "Waiting on another task or dependency"),
     ("agent-regression", "D93F0B", "Bug traced to a merged agent change; fix test-first and add a global guard"),
+    ("ops-skip", "EDEDED", "Triage skipped: umbrella or not agent work; the ops worker ignores it"),
 ]
 ACTIONS_APP_ID = 15368
 
@@ -133,6 +134,7 @@ def audit(repo):
     return {
         "repo": repo, "branch": branch, "empty": info.get("size", 0) == 0,
         "label": all(n in have for n, _, _ in LABELS),
+        "agent_push": agent_can_push(repo),
         "basic_protection": {"deletion", "non_fast_forward"} <= types,
         "full_protection": {"pull_request", "required_status_checks"} <= types,
         "map": bool(names & {"CLAUDE.md", "AGENTS.md"}),
@@ -201,6 +203,22 @@ def apply(state):
     return done
 
 
+def agent_login():
+    return load(Path.home() / ".claude" / "ops" / "config.json", {}).get("agent_login")
+
+
+def agent_can_push(repo):
+    """Managed repos (ops config) need the agent account with write (never admin). Granting access is
+    the owner's decision: the baseline only reports the gap (2026-10-12, after an over-broad grant was
+    reverted)."""
+    login = agent_login()
+    managed = load(Path.home() / ".claude" / "ops" / "config.json", {}).get("repos", {})
+    if not login or repo not in managed:
+        return True
+    code, out, _ = gh("api", f"repos/{repo}/collaborators/{login}/permission", "--jq", ".permission")
+    return code == 0 and out in ("write", "maintain", "admin")
+
+
 def direct_push(repo):
     cfg = load(Path.home() / ".claude" / "ops" / "config.json", {})
     return bool(cfg.get("repos", {}).get(repo, {}).get("direct_push"))
@@ -210,6 +228,8 @@ def gaps(state):
     if state.get("skip"):
         return []
     g = []
+    if not state.get("agent_push", True):
+        g.append("agent account cannot push to this managed repo (owner grants access; see Identities)")
     if not state["label"]:
         g.append("missing ops labels (apply failed)")
     if not state["basic_protection"] and not state["empty"]:
@@ -348,7 +368,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:  # a hook must never break a session
+    except Exception:  # a hook must never break a session
         if len(sys.argv) > 1 and sys.argv[1] == "hook":
             sys.exit(0)
         raise

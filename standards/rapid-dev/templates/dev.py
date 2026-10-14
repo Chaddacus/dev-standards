@@ -43,6 +43,8 @@ def run(name, seen=()):
     if name in seen:
         sys.exit(f"task loop at '{name}'")
     env = {**os.environ, "PYTHONUTF8": "1"}
+    if (ROOT / "src").is_dir():  # `-m pkg` works in a fresh git worktree without `setup` (pre-push hook)
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT / "src"), os.environ.get("PYTHONPATH")]))
     for cmd in TASKS[name]:
         if cmd.startswith("@"):
             run(cmd[1:], seen + (name,))
