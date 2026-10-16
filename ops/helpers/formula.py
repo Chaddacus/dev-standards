@@ -56,7 +56,8 @@ def fetch_task(repo, issue):
     prs = {}
     view = gh_json("issue", "view", str(n), "-R", repo, "--json", "closedByPullRequestsReferences")
     refs = [p.get("url") for p in (view or {}).get("closedByPullRequestsReferences") or []]
-    rec = metrics.parse_record(comments, CTX_FOR_FETCH["manager_login_by_repo"].get(repo, CTX_FOR_FETCH["manager_login"]))
+    rec = metrics.parse_record(comments, CTX_FOR_FETCH["manager_login_by_repo"].get(repo, CTX_FOR_FETCH["manager_login"]),
+                               CTX_FOR_FETCH["legacy_manager_logins"])
     if rec and rec.get("pr"):
         refs.append(str(rec["pr"]))
     for ref in refs:
@@ -104,8 +105,10 @@ def load_ctx(now):
     # The cloud runner still acts through the owner's account: there, records are the owner's and
     # owner actions are told apart by the worker marker only.
     by_repo = {r: owner for r, v in cfg.get("repos", {}).items() if v.get("runner") == "cloud"}
+    # Earlier manager logins: their records before the cutoff still count (metrics.is_manager_record).
+    legacy = cfg.get("legacy_manager_logins") or []
     return {"manager_login": agent, "manager_login_by_repo": by_repo, "owner_login": owner,
-            "deploy_repos": deploy, "now": now}
+            "legacy_manager_logins": legacy, "deploy_repos": deploy, "now": now}
 
 
 def main():
@@ -161,7 +164,7 @@ def main():
 
 
 ME = None
-CTX_FOR_FETCH = {"manager_login": None, "manager_login_by_repo": {}}
+CTX_FOR_FETCH = {"manager_login": None, "manager_login_by_repo": {}, "legacy_manager_logins": []}
 
 if __name__ == "__main__":
     main()

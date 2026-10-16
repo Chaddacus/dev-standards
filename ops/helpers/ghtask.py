@@ -13,7 +13,10 @@ with its GitHub tools; the rules live in taskrec.py and the progress module.
   ghtask.py live        <owner/repo> <n> <sha>      -> deploy step: record live_at
   ghtask.py deps        <owner/repo> <n>            -> {"open": [...]} unfinished dependencies
 
-Only records written by the manager's login count; any other "record" is ignored.
+Only records written by the manager's login count; any other "record" is ignored. Exception: a
+record by a login in `legacy_manager_logins` (~/.claude/ops/config.json, optional) counts when it was
+created before that login's cutoff (metrics.is_manager_record). The newest valid record wins, and
+set-record never edits a comment of another login: it posts a new record comment as the current login.
 """
 import json
 import os
@@ -29,6 +32,7 @@ sys.path.insert(0, str(HERE))
 import metrics  # noqa: E402
 
 STATE_LABELS = {"agent-ready", "agent-in-progress", "agent-planning", "agent-review", "needs-owner", "blocked"}
+CONFIG = Path.home() / ".claude" / "ops" / "config.json"
 _ME = None
 
 
@@ -59,11 +63,20 @@ def comments(repo, n):
     return [c for page in pages for c in page]
 
 
+def legacy_logins():
+    """`legacy_manager_logins` from the ops config; empty when the file or the key is missing."""
+    try:
+        legacy = json.loads(CONFIG.read_text(encoding="utf-8")).get("legacy_manager_logins")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return legacy if isinstance(legacy, list) else []
+
+
 def record_comment(repo, n):
-    found = None
+    found, legacy = None, legacy_logins()
     for c in comments(repo, n):
         body = c.get("body") or ""
-        if ((c.get("user") or {}).get("login") == me() and metrics.RECORD_MARK in body
+        if (metrics.is_manager_record(c, me(), legacy) and metrics.RECORD_MARK in body
                 and body.lstrip().startswith("**Task record**")):
             found = c
     return found
@@ -83,7 +96,7 @@ def write_record(repo, n, record, old):
         if old.get("state", "new") != record["state"] else None
     body = helper("render-record", json.dumps(record))
     c = record_comment(repo, n)
-    if c:
+    if c and (c.get("user") or {}).get("login") == me():
         gh("api", "-X", "PATCH", f"repos/{repo}/issues/comments/{c['id']}", "-f", f"body={body}")
     else:
         gh("api", "-X", "POST", f"repos/{repo}/issues/{n}/comments", "-f", f"body={body}")
