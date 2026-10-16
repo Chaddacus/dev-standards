@@ -134,6 +134,7 @@ def audit(repo):
     return {
         "repo": repo, "branch": branch, "empty": info.get("size", 0) == 0,
         "label": all(n in have for n, _, _ in LABELS),
+        "auto_merge": bool(info.get("allow_auto_merge")),
         "agent_push": agent_can_push(repo),
         "basic_protection": {"deletion", "non_fast_forward"} <= types,
         "full_protection": {"pull_request", "required_status_checks"} <= types,
@@ -200,6 +201,12 @@ def apply(state):
         if gh("api", "-X", "POST", f"repos/{repo}/rulesets", "--input", "-", input=json.dumps(body))[0] == 0:
             state["basic_protection"] = True
             done.append("basic protection")
+    if not state.get("auto_merge", True) and not state["empty"]:
+        # CLAUDE.md: the agent enables GitHub auto-merge on its PR once the verifier passes; the repo must allow it
+        # (2026-10-16: history-toons refused `gh pr merge --auto`, "Auto merge is not allowed for this repository")
+        if gh("api", "-X", "PATCH", f"repos/{repo}", "-F", "allow_auto_merge=true")[0] == 0:
+            state["auto_merge"] = True
+            done.append("auto-merge allowed")
     return done
 
 
@@ -234,6 +241,8 @@ def gaps(state):
         g.append("missing ops labels (apply failed)")
     if not state["basic_protection"] and not state["empty"]:
         g.append("default branch not protected against deletion/force-push (apply failed)")
+    if not state.get("auto_merge", True) and not state["empty"]:
+        g.append("auto-merge not allowed, so `gh pr merge --auto` fails (apply failed)")
     if not state.get("map", True) and not state["empty"]:
         g.append("no repo map (CLAUDE.md or AGENTS.md with key commands, layout, checks); have the reader agent draft one")
     if not state.get("fast_checks", True) and not state["empty"]:
