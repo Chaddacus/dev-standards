@@ -55,6 +55,11 @@ The `dev` task starts the app so saved changes appear without a manual restart o
 - `python dev.py setup` works from a clean clone, is safe to re-run, and never needs secrets. It
   installs the repository's own dependency files (`requirements*.txt`, `pyproject.toml`,
   `package-lock.json`), so the FAST checks see the same imports CI and production do.
+- Every new git worktree (agent worktrees included) runs `python dev.py setup` before its first
+  check or push: a worktree has no `.venv` or `node_modules` of its own, and the pre-push FAST
+  hook then runs with whatever tools it finds. After a merge that changes dependency files, run
+  setup again in the main checkout. (2026-10-17: pytest-xdist reached main; worktrees without
+  setup failed the hook with "unrecognized arguments: -n".)
 - `.env.example` lists every setting with safe development defaults; real secrets stay outside
   the repository.
 - Local dependencies (databases, search, queues) run in compose with a seed task, so development
