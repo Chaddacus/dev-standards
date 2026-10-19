@@ -47,6 +47,10 @@ The `dev` task starts the app so saved changes appear without a manual restart o
   `GIT_CONFIG_*`, set `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` to the null device, and
   pass `-c user.name=t -c user.email=t@t` to commits. Clean temp repos up in the test. Agent and
   CI git settings otherwise leak in (2026-10-12).
+- Tests never read the real clock. Pass `now` in, or monkeypatch the code's one clock helper, so a
+  test gives the same result on any date. Check it by running the suite with the clock moved weeks
+  and months ahead. Tests with dates hard-coded near "today" pass for a few days, then break every
+  push at once (history-toons calendar tests, 2026-10-19).
 
 ## 4. Reproducible setup
 
