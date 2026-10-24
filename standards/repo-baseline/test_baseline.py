@@ -115,5 +115,18 @@ class HookCache(unittest.TestCase):
         self.assertIn("no CI workflow", out.getvalue())  # file facts still come from the clone
 
 
+class LocalRoot(unittest.TestCase):
+    def test_main_clone_wins_over_worktree(self):
+        base = Path(tempfile.mkdtemp())
+        main = base / "b-main"
+        subprocess.run(["git", "init", "-q", str(main)], check=True)
+        subprocess.run(["git", "-C", str(main), "remote", "add", "origin", "https://github.com/O/r.git"], check=True)
+        wt = base / "a-wt"  # sorts first
+        wt.mkdir()
+        (wt / ".git").write_text("gitdir: elsewhere", encoding="utf-8")
+        with mock.patch.object(baseline, "CODE_DIRS", [base]), mock.patch.object(baseline, "repo_from_cwd", return_value="O/r"):
+            self.assertEqual(baseline.local_root("O/r"), main)
+
+
 if __name__ == "__main__":
     unittest.main()

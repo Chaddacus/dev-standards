@@ -183,12 +183,13 @@ def git_root(cwd):
 
 
 def local_root(repo):
-    """The local clone of OWNER/NAME under ~/code/personal or ~/code, if there is one."""
+    """The main local clone of OWNER/NAME under ~/code/personal or ~/code, if there is one. Worktrees
+    (their `.git` is a file) are skipped: they may hold an unmerged branch."""
     for base in CODE_DIRS:
         if not base.is_dir():
             continue
         for d in sorted(base.iterdir()):
-            if (d / ".git").exists() and (repo_from_cwd(str(d)) or "").lower() == repo.lower():
+            if (d / ".git").is_dir() and (repo_from_cwd(str(d)) or "").lower() == repo.lower():
                 return d
     return None
 
