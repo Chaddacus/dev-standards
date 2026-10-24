@@ -7,8 +7,11 @@ Baseline per repo:
   - a CI workflow (reported; Claude adds it, since checks are repo-specific)
 
 Commands:
-  hook            SessionStart hook: check the repo in the session cwd (cached 24h),
-                  apply what is safe, and tell Claude about remaining gaps.
+  hook            SessionStart hook: check the repo in the session cwd, apply what is safe,
+                  and tell Claude about remaining gaps. File checks read the local clone
+                  (no network); the GitHub settings check (labels, rulesets, auto-merge,
+                  agent access) is cached 24h per repo, so a warm session start makes no
+                  GitHub call (GitHub-light operation, owner decision 2026-10-24).
   audit  [--all]  report the cwd repo, or every owned repo
   apply  [--all]  apply label + basic ruleset to the cwd repo, or every owned repo
   protect --full --check NAME [--repo OWNER/NAME]
@@ -27,6 +30,7 @@ STATE = Path.home() / ".claude" / "repo-baseline"
 CONFIG = STATE / "config.json"
 CACHE = STATE / "cache.json"
 CACHE_TTL = 24 * 3600
+CACHE_VERSION = 2  # 2: the cache holds GitHub settings only; file facts are read locally each session
 DEFAULT_CONFIG = {"owners": ["Chaddacus", "Van-Quest-Games"]}
 LABELS = [
     ("needs-owner", "B60205", "Blocked on an owner decision or access; agent continues other work"),
@@ -108,7 +112,19 @@ def all_repos():
     return out
 
 
-def audit(repo):
+def audit(repo, root=None):
+    """Settings from the GitHub API plus file facts. File facts come from the local clone when one
+    exists (no API calls); only repos without a local clone read their files through the API."""
+    state = remote_audit(repo)
+    if state.get("skip"):
+        return state
+    root = root or local_root(repo)
+    state.update(local_facts(root) if root else remote_facts(repo, state["branch"]))
+    return state
+
+
+def remote_audit(repo):
+    """The settings only GitHub knows: 3 calls (+1 on a managed repo). The hook caches them 24h."""
     info = gh_json("api", f"repos/{repo}")
     if not info:
         return {"repo": repo, "skip": "not reachable"}
@@ -118,6 +134,18 @@ def audit(repo):
     rules = gh_json("api", f"repos/{repo}/rules/branches/{branch}") or []
     types = {r.get("type") for r in rules}
     have = {l["name"] for l in (gh_json("api", f"repos/{repo}/labels?per_page=100") or []) if isinstance(l, dict)}
+    return {
+        "repo": repo, "branch": branch, "empty": info.get("size", 0) == 0,
+        "label": all(n in have for n, _, _ in LABELS),
+        "auto_merge": bool(info.get("allow_auto_merge")),
+        "agent_push": agent_can_push(repo),
+        "basic_protection": {"deletion", "non_fast_forward"} <= types,
+        "full_protection": {"pull_request", "required_status_checks"} <= types,
+    }
+
+
+def remote_facts(repo, branch):
+    """File facts through the API, only for `audit --all` on a repo that has no local clone."""
     wf = gh_json("api", f"repos/{repo}/contents/.github/workflows?ref={branch}") or []
     root = gh_json("api", f"repos/{repo}/contents?ref={branch}") or []
     names = {f.get("name") for f in root if isinstance(f, dict)}
@@ -132,12 +160,6 @@ def audit(repo):
         except Exception:
             fast_cmds = ""
     return {
-        "repo": repo, "branch": branch, "empty": info.get("size", 0) == 0,
-        "label": all(n in have for n, _, _ in LABELS),
-        "auto_merge": bool(info.get("allow_auto_merge")),
-        "agent_push": agent_can_push(repo),
-        "basic_protection": {"deletion", "non_fast_forward"} <= types,
-        "full_protection": {"pull_request", "required_status_checks"} <= types,
         "map": bool(names & {"CLAUDE.md", "AGENTS.md"}),
         "dev_py": "dev.py" in names,
         "containers": containers,
@@ -146,6 +168,99 @@ def audit(repo):
         "static_checks": bool(re.search(STATIC_RE, fast_cmds + " " + dev_fast_tasks(repo, branch, fast_cmds), re.I)),
         "ci": any(str(f.get("name", "")).endswith((".yml", ".yaml")) for f in wf if isinstance(f, dict)),
     }
+
+
+CODE_DIRS = [Path.home() / "code" / "personal", Path.home() / "code"]
+
+
+def git_root(cwd):
+    try:
+        out = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, timeout=10).stdout.strip()
+    except Exception:
+        return None
+    return Path(out) if out else None
+
+
+def local_root(repo):
+    """The local clone of OWNER/NAME under ~/code/personal or ~/code, if there is one."""
+    for base in CODE_DIRS:
+        if not base.is_dir():
+            continue
+        for d in sorted(base.iterdir()):
+            if (d / ".git").exists() and (repo_from_cwd(str(d)) or "").lower() == repo.lower():
+                return d
+    return None
+
+
+def read(path):
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def local_facts(root):
+    """Every file-based baseline fact, read from the working tree. No network."""
+    root = Path(root)
+    dirs = [d for d in (root, root / "deploy", root / "docker") if d.is_dir()]
+    names = {p.name for p in root.iterdir()} if root.is_dir() else set()
+    compose = [p for d in dirs for p in d.iterdir() if p.is_file() and COMPOSE.match(p.name)]
+    containers = bool(compose) or any((d / "Dockerfile").is_file() for d in dirs)
+    watch = any(re.search(r"^\s*develop:\s*$", read(p), re.M) and "watch:" in read(p) for p in compose)
+    fast_cmds = ""
+    vpath = root / ".claude" / "verification.json"
+    if vpath.is_file():
+        try:
+            fast_cmds = " ".join(c.get("command", "") for c in (json.loads(read(vpath)).get("fast") or [])
+                                 if isinstance(c, dict))
+        except Exception:
+            fast_cmds = ""
+    dev_fast = ""
+    if "dev.py" in fast_cmds:
+        m = re.search(r'"fast"\s*:\s*\[(.*?)\]', read(root / "dev.py"), re.S)
+        dev_fast = m.group(1) if m else ""
+    wf_dir = root / ".github" / "workflows"
+    workflows = sorted(p for p in wf_dir.iterdir() if p.suffix in (".yml", ".yaml")) if wf_dir.is_dir() else []
+    return {
+        "map": bool(names & {"CLAUDE.md", "AGENTS.md"}),
+        "dev_py": "dev.py" in names,
+        "containers": containers,
+        "compose_watch": watch,
+        "fast_checks": vpath.is_file(),
+        "static_checks": bool(re.search(STATIC_RE, fast_cmds + " " + dev_fast, re.I)),
+        "ci": bool(workflows),
+        "ci_cost": [f"{p.name} {x}" for p in workflows for x in workflow_cost(read(p))],
+        "lfs_fetchexclude": lfs_fetchexclude_ok(root),
+    }
+
+
+def on_block(text):
+    """The `on:` trigger section of a workflow as text (from the top-level key to the next one)."""
+    m = re.search(r"""^["']?on["']?\s*:(.*?)(?=^\S|\Z)""", text, re.M | re.S)
+    return m.group(1) if m else ""
+
+
+def workflow_cost(text):
+    """GitHub-light CI (owner decision 2026-10-24): one job on pull_request only, LFS off.
+    Returns the cost problems found in one workflow file."""
+    out = []
+    trig = on_block(text)
+    for t in ("push", "schedule"):
+        if re.search(rf"(^|[\s\[,]){t}\b", trig):
+            out.append(f"is triggered by {t}")
+    if re.search(r"^\s*matrix\s*:", text, re.M):
+        out.append("uses a matrix")
+    if re.search(r"^\s*lfs\s*:\s*true\b", text, re.M) or re.search(r"git\s+lfs\s+(pull|fetch|checkout)", text):
+        out.append("downloads Git LFS files")
+    return out
+
+
+def lfs_fetchexclude_ok(root):
+    """An LFS repo keeps raw source art out of the default fetch with an `.lfsconfig` fetchexclude."""
+    if "filter=lfs" not in read(Path(root) / ".gitattributes"):
+        return True
+    return bool(re.search(r"^\s*fetchexclude\s*=\s*\S", read(Path(root) / ".lfsconfig"), re.M | re.I))
 
 
 STATIC_RE = r"ruff|flake8|pylint|mypy|pyright|eslint|tsc|typecheck|lint|clippy|golangci|vet"
@@ -255,6 +370,13 @@ def gaps(state):
         state["repo"], {}).get("compose_watch", "")
     if state.get("containers") and not state.get("compose_watch", True) and not str(exempt).startswith("exempt"):
         g.append("rapid-dev: containers without a hot-reload compose override (develop.watch)")
+    for x in state.get("ci_cost", []):
+        g.append(f"GitHub-light CI: workflow {x} (keep one job on pull_request only, LFS off)")
+    lfs_exempt = load(Path.home() / ".claude" / "ops" / "config.json", {}).get("repos", {}).get(
+        state["repo"], {}).get("lfs_fetchexclude", "")
+    if not state.get("lfs_fetchexclude", True) and not str(lfs_exempt).startswith("exempt"):
+        g.append("Git LFS repo without an `.lfsconfig` `fetchexclude` for raw source art, so every clone "
+                 "and fetch downloads it (GitHub-light operation)")
     if not state["ci"]:
         g.append("no CI workflow")
     elif not state["full_protection"] and not direct_push(state["repo"]):
@@ -267,18 +389,22 @@ def cmd_hook(_):
         data = json.load(sys.stdin)
     except Exception:
         data = {}
-    repo = repo_from_cwd(data.get("cwd") or os.getcwd())
+    cwd = data.get("cwd") or os.getcwd()
+    repo = repo_from_cwd(cwd)
     if not repo or repo.split("/")[0].lower() not in owners():
         return
     cache = load(CACHE, {})
     hit = cache.get(repo)
-    if hit and time.time() - hit["at"] < CACHE_TTL:
+    if hit and hit.get("v") == CACHE_VERSION and time.time() - hit.get("at", 0) < CACHE_TTL:
         state, done = hit["state"], []
     else:
-        state = audit(repo)
+        state = remote_audit(repo)
         done = apply(state)
-        cache[repo] = {"at": time.time(), "state": state}
+        cache[repo] = {"at": time.time(), "v": CACHE_VERSION, "state": state}
         save(CACHE, cache)
+    root = git_root(cwd)
+    if root and not state.get("skip"):
+        state = {**state, **local_facts(root)}
     g = gaps(state)
     if not g and not done:
         return
@@ -291,6 +417,10 @@ def cmd_hook(_):
         lines.append("Close gaps as routine work under the repo-baseline skill (no need to ask the user).")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                              "additionalContext": "\n".join(lines)}}))
+
+
+REMOTE_KEYS = ("repo", "skip", "branch", "empty", "label", "auto_merge", "agent_push",
+               "basic_protection", "full_protection")
 
 
 def targets(a):
@@ -307,7 +437,8 @@ def cmd_audit(a, do_apply=False):
     for repo in targets(a):
         state = audit(repo)
         done = apply(state) if do_apply else []
-        cache[repo] = {"at": time.time(), "state": state}
+        cache[repo] = {"at": time.time(), "v": CACHE_VERSION,
+                       "state": {k: state[k] for k in REMOTE_KEYS if k in state}}
         if state.get("skip"):
             print(f"skip  {repo}: {state['skip']}")
             continue
