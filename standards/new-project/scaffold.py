@@ -60,9 +60,8 @@ def ci_yaml(owner, public, python=None, node=None, setup=None, check=None):
         return f"""
 name: checks
 
+# Minimal by design: one job, pull requests only (main changes only through checked PRs).
 on:
-  push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -81,9 +80,8 @@ jobs:
 # Inline copy of the shared check (this repository cannot call {SHARED_CI.split('/.github')[0]}).
 name: checks
 
+# Minimal by design: one job, pull requests only (main changes only through checked PRs).
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -350,6 +348,9 @@ framework and I/O code stays thin.
             "owner_gh_config_dir")
         owner_env = {"GH_CONFIG_DIR": owner_dir} if owner_dir else None
         sh(f"gh repo create {args.owner}/{args.name} {vis} --source . --push", cwd=root, env=owner_env)
+        # Auto-merge and branch cleanup: the standing merge flow uses `gh pr merge --auto`.
+        sh(f"gh api -X PATCH repos/{args.owner}/{args.name} -F allow_auto_merge=true "
+           f"-F delete_branch_on_merge=true --silent", cwd=root, check=False, env=owner_env)
         agent = json.loads((Path.home() / ".claude/ops/config.json").read_text(encoding="utf-8")).get("agent_login")
         if agent:  # the agent works in every new project with write access, never admin
             sh(f"gh api -X PUT repos/{args.owner}/{args.name}/collaborators/{agent} -f permission=push",
