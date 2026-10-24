@@ -20,6 +20,9 @@ The spine and modules are the same everywhere; only these adapters differ.
 ## cloud (routine "Cloud ops worker (issues opened + hourly)")
 
 - Repositories: the ones checked out in the session (except dev-standards).
+  Never a Git LFS-heavy repository (`cloud: never` in the ops config; treasure_wake_unreal is about
+  13.6 GB per full LFS download): GitHub-light operation, owner decision 2026-10-24. Those repos
+  are worked only by the local runner, from the local clone and its worktrees.
 - Queue and records: the GitHub tools available in the session (list issues, read/write
   comments, labels). Before every state change run `python ops/helpers/taskrec.py transition`,
   and before rewriting a record run `taskrec.py check-update` with the old and new record (frozen
