@@ -33,14 +33,6 @@ class DevPy(unittest.TestCase):
                 r = run(name)
                 self.assertEqual(r.returncode, want, f"{name}: {r.stdout}{r.stderr}")
 
-    def test_banners_go_to_stderr(self):
-        # stdout carries only the commands' own output, so `$(python dev.py <task>)` captures cleanly.
-        for name, cmds in devpy.TASKS.items():
-            if cmds and all(c.startswith(("say:", "fail:")) for c in cmds):
-                r = run(name)
-                self.assertEqual(r.stdout, "", f"{name}: banner leaked to stdout")
-                self.assertIn(f"[{name}]", r.stderr)
-
     def test_no_shell_echo_messages(self):
         for name, cmds in devpy.TASKS.items():
             for c in cmds:

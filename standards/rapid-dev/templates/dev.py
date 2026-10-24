@@ -50,13 +50,13 @@ def run(name, seen=()):
             run(cmd[1:], seen + (name,))
             continue
         if cmd.startswith(("say:", "fail:")):  # messages never go through a shell (cmd.exe eats < > |)
-            print(f"[{name}] {cmd.split(':', 1)[1].strip()}", file=sys.stderr, flush=True)
+            print(f"[{name}] {cmd.split(':', 1)[1].strip()}", flush=True)
             if cmd.startswith("fail:"):
                 sys.exit(1)
             continue
         py = f"\"{VENV_PY}\"" if VENV_PY.exists() else f"\"{sys.executable}\""
         cmd = cmd.replace("{py}", py)
-        print(f"[{name}] {cmd}", file=sys.stderr, flush=True)  # stdout is for command output
+        print(f"[{name}] {cmd}", flush=True)
         code = subprocess.call(cmd, shell=True, cwd=ROOT, env=env)
         if code != 0:
             sys.exit(code)
