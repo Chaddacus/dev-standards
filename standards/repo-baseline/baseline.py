@@ -201,6 +201,23 @@ def read(path):
         return ""
 
 
+def default_branch_workflows(root):
+    """CI files as committed on the last-fetched default branch (origin/HEAD, else origin/main),
+    so a stale checkout does not report CI problems main already fixed. Local git only, no
+    network. None when there is no such ref (then the working tree is used)."""
+    def git(*a):
+        r = subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        return r.stdout if r.returncode == 0 else None
+    for ref in ("origin/HEAD", "origin/main", "origin/master"):
+        if git("rev-parse", "--verify", "-q", ref) is None:
+            continue
+        names = git("ls-tree", "--name-only", f"{ref}:.github/workflows") or ""
+        return {n: git("show", f"{ref}:.github/workflows/{n}") or ""
+                for n in sorted(names.split()) if n.endswith((".yml", ".yaml"))}
+    return None
+
+
 def local_facts(root):
     """Every file-based baseline fact, read from the working tree. No network."""
     root = Path(root)
@@ -222,6 +239,7 @@ def local_facts(root):
         m = re.search(r'"fast"\s*:\s*\[(.*?)\]', read(root / "dev.py"), re.S)
         dev_fast = m.group(1) if m else ""
     wf_dir = root / ".github" / "workflows"
+    committed = default_branch_workflows(root)
     workflows = sorted(p for p in wf_dir.iterdir() if p.suffix in (".yml", ".yaml")) if wf_dir.is_dir() else []
     return {
         "map": bool(names & {"CLAUDE.md", "AGENTS.md"}),
@@ -230,8 +248,10 @@ def local_facts(root):
         "compose_watch": watch,
         "fast_checks": vpath.is_file(),
         "static_checks": bool(re.search(STATIC_RE, fast_cmds + " " + dev_fast, re.I)),
-        "ci": bool(workflows),
-        "ci_cost": [f"{p.name} {x}" for p in workflows for x in workflow_cost(read(p))],
+        "ci": bool(committed) if committed is not None else bool(workflows),
+        "ci_cost": ([f"{n} {x}" for n, t in committed.items() for x in workflow_cost(t)]
+                    if committed is not None
+                    else [f"{p.name} {x}" for p in workflows for x in workflow_cost(read(p))]),
         "lfs_fetchexclude": lfs_fetchexclude_ok(root),
     }
 
@@ -239,7 +259,7 @@ def local_facts(root):
 def on_block(text):
     """The `on:` trigger section of a workflow as text (from the top-level key to the next one)."""
     m = re.search(r"""^["']?on["']?\s*:(.*?)(?=^\S|\Z)""", text, re.M | re.S)
-    return m.group(1) if m else ""
+    return re.sub(r"#.*", "", m.group(1)) if m else ""
 
 
 def workflow_cost(text):
@@ -247,6 +267,9 @@ def workflow_cost(text):
     Returns the cost problems found in one workflow file."""
     out = []
     trig = on_block(text)
+    # Manual-only (workflow_dispatch) jobs run only when someone starts them, so they cost nothing.
+    if re.findall(r"[A-Za-z_]+", trig) == ["workflow_dispatch"]:
+        return out
     for t in ("push", "schedule"):
         if re.search(rf"(^|[\s\[,]){t}\b", trig):
             out.append(f"is triggered by {t}")
