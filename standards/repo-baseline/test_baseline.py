@@ -61,6 +61,36 @@ jobs:
         text = PR_ONLY + "      - run: git push origin HEAD\n"
         self.assertEqual(baseline.workflow_cost(text), [])
 
+    def test_manual_only_workflow_costs_nothing(self):
+        # A workflow_dispatch-only job runs only when someone starts it, so LFS there is not a gap.
+        text = ("on:\n  workflow_dispatch:\njobs:\n  t:\n    steps:\n"
+                "      - uses: actions/checkout@v7\n        with:\n          lfs: true\n")
+        self.assertEqual(baseline.workflow_cost(text), [])
+
+    def test_trigger_words_in_comments_are_ignored(self):
+        text = "on:\n  # never on push, see the schedule note\n  pull_request:\njobs: {}\n"
+        self.assertEqual(baseline.workflow_cost(text), [])
+
+    def test_ci_files_come_from_the_fetched_default_branch(self):
+        # A stale checkout must not report CI problems that main already fixed (2026-10-26).
+        d = Path(tempfile.mkdtemp())
+        def git(*a):
+            subprocess.run(["git", "-C", str(d), *a], check=True, capture_output=True)
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        wf = d / ".github" / "workflows" / "ci.yml"
+        wf.parent.mkdir(parents=True)
+        wf.write_text("on: [push, pull_request]\njobs: {}\n", encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-qm", "old")
+        old = subprocess.run(["git", "-C", str(d), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        wf.write_text("on:\n  pull_request:\njobs: {}\n", encoding="utf-8")
+        git("commit", "-qam", "new")
+        git("update-ref", "refs/remotes/origin/main", "HEAD")
+        git("checkout", "-q", old)
+        self.assertEqual(baseline.local_facts(d)["ci_cost"], [])
+
 
 class LocalFacts(unittest.TestCase):
     def make(self, files):
