@@ -20,6 +20,10 @@ Accuracy:
 Speed:
 - Delegate reading of more than a few files to the `reader` agent (Haiku).
 - Batch independent commands.
+- Keep context small: read only the parts of files you need, and keep long logs out of the
+  conversation. When the spend guard says your context passed its limit, stop starting new work:
+  commit and push, post a `milestone` update, and reply with a handoff (done, left, next step,
+  branch) so a fresh worker continues.
 
 Scope: stay inside the assignment. Work that needs more (other modules, interface changes, unclear
 intent) goes back as a `blocked` update with the reason; do not expand scope yourself.
