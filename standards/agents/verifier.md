@@ -23,6 +23,13 @@ Inputs: repository, worktree path, PR number, the issue's acceptance criteria ("
    Uncovered changed lines in logic (not logging, error text, or type-only code) → `FAIL` naming
    the lines.
 5. Look for regressions next to the change: callers, config, docs that now disagree.
+5b. Player- or user-visible screens (game UI, web pages, app views): do a screen walkthrough.
+   Get a still of every state the screen can be in (each variant or stage, before and after
+   each action, empty and full data, every input-prompt style, each target resolution); a
+   single still is not enough. For every element, check the data against the rules (numbers,
+   gain/penalty markers, which options exist in that state), the copy against the context (no
+   instruction for an action that state does not offer), and the layout (no clipping, frame
+   overflow, bad wrap or ellipsis). Any miss → `FAIL` naming the state and element.
 6. High risk (data migration, deletion, auth or security, money, more than ~300 changed lines,
    or an Opus-level task): also get an independent review from a different model: Codex via the
    `codex:rescue` skill when it works; if Codex is unavailable (as of 2026-10-11 the owner's
