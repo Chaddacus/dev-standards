@@ -84,6 +84,11 @@ def validate_record(r):
         fail(f"record: state must be one of {STATES}")
     if not 1 <= len(r["done_when"]) <= 8 or not all(isinstance(x, str) and x for x in r["done_when"]):
         fail("record: done_when needs 1-8 non-empty criteria")
+    for field in ("depends_on", "children"):  # task references: "#12" or "owner/repo#12"
+        for i, item in enumerate(r.get(field) or []):
+            if not isinstance(item, str) or not item.strip():
+                fail(f"record: {field} items must be non-empty strings like \"#12\" or \"owner/repo#12\" "
+                     f"(item {i} is {json.dumps(item)})")
     if r.get("model") and not r.get("routing_reason"):
         fail("record: a routed task needs routing_reason (why this model and effort)")
     if r.get("size_at_triage") is not None and r["size_at_triage"] not in SIZES:

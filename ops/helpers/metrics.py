@@ -11,6 +11,7 @@ Raw task shape:
    "prs": [{"number": 12, "url": str, "merged_at": iso | None}]}
 Regression shape: {"repo", "number", "created_at", "body"}
 Context: {"manager_login": str, "manager_login_by_repo": {repo: login}, "owner_login": str,
+          "legacy_manager_logins": [{"login": str, "until": iso}] (optional),
           "deploy_repos": [..], "now": iso}
 """
 import json
@@ -46,13 +47,37 @@ def hours(a, b):
 
 # ---------- parsing ----------
 
-def parse_record(comments, manager_login):
+def is_manager_record(comment, login, legacy=()):
+    """True when `comment` was written by the manager. That is the current manager `login`, or a
+    legacy login (an earlier manager account, for example the owner before agent work moved to a
+    bot) for a comment created before that login's cutoff. `legacy` is the config list
+    [{"login": str, "until": iso}]. The cutoff is compared with `created_at`, never `updated_at`,
+    so a later edit neither revives nor hides a record. Anything malformed does not count.
+    Accepts both comment shapes: metrics ({"author": login}) and GitHub REST ({"user": {"login"}})."""
+    author = comment.get("author") or (comment.get("user") or {}).get("login")
+    if not author:
+        return False
+    if author == login:
+        return True
+    for entry in legacy if isinstance(legacy, (list, tuple)) else ():
+        if not isinstance(entry, dict) or entry.get("login") != author:
+            continue
+        try:
+            if ts(comment["created_at"]) < ts(entry["until"]):
+                return True
+        except (KeyError, TypeError, ValueError):
+            continue
+    return False
+
+
+def parse_record(comments, manager_login, legacy=()):
     """Latest manager-authored task record (content), with `_created_at` = the earliest valid
-    record comment (acceptance time). Records by anyone else, quoted or malformed, are ignored."""
+    record comment (acceptance time). Records by anyone else, quoted or malformed, are ignored.
+    Records by a legacy manager login before its cutoff count (see is_manager_record)."""
     found, first = None, None
     for c in sorted(comments, key=lambda c: c["created_at"]):
         body = c.get("body") or ""
-        if c.get("author") != manager_login or RECORD_MARK not in body:
+        if not is_manager_record(c, manager_login, legacy) or RECORD_MARK not in body:
             continue
         if not body.lstrip().startswith("**Task record**"):
             continue
@@ -342,7 +367,7 @@ def compute(raw_tasks, regressions, ctx, since, until):
     for raw in raw_tasks:
         login = ctx.get("manager_login_by_repo", {}).get(raw["repo"], ctx["manager_login"])
         try:
-            rec = parse_record(raw.get("comments", []), login)
+            rec = parse_record(raw.get("comments", []), login, ctx.get("legacy_manager_logins") or ())
         except Exception:  # noqa: BLE001 - a bad record must not stop the report
             rec = None
         if rec:

@@ -412,6 +412,77 @@ def test_routing_table_counts_tasks():
     assert s["routing_table"]["M"]["sonnet"] == {"model": "sonnet", "k": 3, "n": 3}
 
 
+# ---------- legacy manager records (issue #6) ----------
+# Agent work moved from the owner login to a bot login. Records the owner wrote before the
+# cutoff must still count; records it writes after the cutoff must not.
+
+BOT = "agent-bot"
+CUTOFF = at(10)
+LEGACY = [{"login": OWNER, "until": CUTOFF}]
+LCTX = dict(CTX, manager_login=BOT, legacy_manager_logins=LEGACY)
+
+
+def authored(by, at_h, **kw):
+    c = record(at_h=at_h, **kw)
+    c["author"] = by
+    return c
+
+
+def test_legacy_record_before_cutoff_counts():
+    rec = M.parse_record([authored(OWNER, 1, size=5)], BOT, LEGACY)
+    assert rec["size"] == 5 and rec["_created_at"] == at(1)
+    assert M.parse_record([authored(OWNER, 1)], BOT) is None  # no legacy list: still ignored
+
+
+def test_legacy_record_after_cutoff_does_not_count():
+    assert M.parse_record([authored(OWNER, 20)], BOT, LEGACY) is None
+    assert M.parse_record([authored(OWNER, 10)], BOT, LEGACY) is None  # at the cutoff the agent has taken over
+
+
+def test_manager_login_record_still_counts_with_a_legacy_list():
+    assert M.parse_record([authored(BOT, 20, size=2)], BOT, LEGACY)["size"] == 2
+    assert M.parse_record([authored(BOT, 1, size=2)], BOT, LEGACY)["size"] == 2
+
+
+def test_newer_manager_record_wins_over_legacy_record():
+    comments = [authored(OWNER, 1, state="review"), authored(BOT, 20, state="done")]
+    rec = M.parse_record(comments, BOT, LEGACY)
+    assert rec["state"] == "done" and rec["_created_at"] == at(1)  # acceptance time stays the legacy one
+    assert M.parse_record(comments[::-1], BOT, LEGACY)["state"] == "done"  # input order does not matter
+    # an owner record after the cutoff never overrides the manager's older record
+    stale = [authored(BOT, 12, state="review"), authored(OWNER, 20, state="done")]
+    assert M.parse_record(stale, BOT, LEGACY)["state"] == "review"
+
+
+def test_is_manager_record_uses_created_at_and_both_comment_shapes():
+    edited_later = {"user": {"login": OWNER}, "created_at": at(1), "updated_at": at(50)}
+    created_later = {"user": {"login": OWNER}, "created_at": at(20), "updated_at": at(2)}
+    assert M.is_manager_record(edited_later, BOT, LEGACY)  # an edit after the cutoff does not matter
+    assert not M.is_manager_record(created_later, BOT, LEGACY)
+    assert M.is_manager_record({"author": BOT, "created_at": at(20)}, BOT, LEGACY)
+    assert not M.is_manager_record({"author": "stranger", "created_at": at(1)}, BOT, LEGACY)
+    assert not M.is_manager_record({"author": OWNER}, BOT, LEGACY)  # no created_at: fails closed
+
+
+def test_bad_legacy_config_fails_closed():
+    c = authored(OWNER, 1)
+    for bad in ([{"login": OWNER}], [{"login": OWNER, "until": "not a date"}], [OWNER], [None], None, []):
+        assert not M.is_manager_record(c, BOT, bad), bad
+    mixed = [{"login": "other", "until": "bad"}, {"login": OWNER, "until": CUTOFF}]
+    assert M.is_manager_record(c, BOT, mixed)
+
+
+def test_legacy_list_in_ctx_reaches_compute():
+    raw = task(260, merged=2, closed=2)
+    raw["comments"][0]["author"] = OWNER  # a pre-cutoff record written by the owner login
+    tasks, _ = M.compute([raw], [], LCTX, SINCE, UNTIL)
+    assert [t["task"] for t in tasks] == ["o/r#260"]
+    assert M.compute([raw], [], dict(LCTX, legacy_manager_logins=[]), SINCE, UNTIL)[0] == []
+    late = task(261, merged=2, closed=2, at_h=20)
+    late["comments"][0]["author"] = OWNER  # written after the cutoff: not a manager record
+    assert M.compute([late], [], LCTX, SINCE, UNTIL)[0] == []
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

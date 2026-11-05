@@ -69,6 +69,22 @@ def test_v3_fields_and_frozen_counters():
     assert run("transition", {"from": "blocked", "to": "done"}) == (0, "ok")
 
 
+def test_depends_on_and_children_need_non_empty_strings():
+    # A numeric depends_on used to crash render-record with a TypeError traceback (issue #2).
+    for field in ("depends_on", "children"):
+        for bad in ([167], ["#12", 7], [""], [None], [["#1"]], [True], ["  "]):
+            code, out = run("render-record", {**RECORD, field: bad})
+            assert code == 1, (field, bad)
+            assert f"record: {field} items must be non-empty strings" in out, (field, bad, out)
+        ok = ["#12", "owner/repo#12"]
+        code, md = run("render-record", {**RECORD, field: ok})
+        assert code == 0 and json.loads(run("parse-record", md)[1])[field] == ok
+    # The parse side reports the same message instead of a traceback.
+    _, md = run("render-record", {**RECORD, "depends_on": ["#1"]})
+    code, out = run("parse-record", md.replace('"#1"', "1"))
+    assert code == 1 and "depends_on items must be non-empty strings" in out
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

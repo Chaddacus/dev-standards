@@ -26,6 +26,8 @@ Every new record also sets (ops/METRICS.md):
   baseline gaps, flaky tests); `monitor` for live-monitor issues; `regression-fix` for fixes of
   an agent-caused bug (0 points).
 - A skip still gets a short comment with the reason (`ghtask.py comment`), so the digest can list skips.
+  It also gets the label `ops-skip` (umbrellas and non-agent work; create the label if the repository
+  lacks it), which precheck ignores, so a skipped issue is not triaged again on every run.
 - Every manager comment (questions, plans, skips) goes through `ghtask.py comment` so it carries the
   worker marker; an unmarked comment counts as the owner's.
 
