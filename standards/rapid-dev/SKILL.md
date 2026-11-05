@@ -15,10 +15,10 @@ Every repository has `dev.py` at the root (template: `templates/dev.py`, stdlib 
 Windows without make). Standard tasks: `setup`, `dev`, `fast`, `test`, `check`, `logs`, `deploy`,
 `rollback`. Tasks wrap the stack's real tools (npm scripts, make targets, uvicorn, UBT); keep
 those, add the uniform entry point. `.claude/verification.json` `fast` runs `python dev.py fast`;
-CI runs `python dev.py check`.
+There is no CI (owner 2026-10-31): the pre-push hook runs `python dev.py fast`.
 Messages use `say:` / `fail:` tasks, never shell `echo` (cmd.exe treats `< > |` as redirects; found
 2026-10-11). Each repository has a smoke test that runs every non-mutating task (`--list`,
-message tasks, stubs) and checks its exit code, so a task that breaks on one OS fails in CI.
+message tasks, stubs) and checks its exit code, so a task that breaks on one OS fails the FAST tier.
 
 ## 2. Hot reload everywhere
 
@@ -45,8 +45,7 @@ The `dev` task starts the app so saved changes appear without a manual restart o
 - Any single test file runs alone in seconds.
 - Tests that run git (temp repos) use an explicit environment: copy `os.environ`, drop every
   `GIT_CONFIG_*`, set `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` to the null device, and
-  pass `-c user.name=t -c user.email=t@t` to commits. Clean temp repos up in the test. Agent and
-  CI git settings otherwise leak in (2026-10-12).
+  pass `-c user.name=t -c user.email=t@t` to commits. Clean temp repos up in the test. Agent git settings otherwise leak in (2026-10-12).
 - Tests never read the real clock. Pass `now` in, or monkeypatch the code's one clock helper, so a
   test gives the same result on any date. Check it by running the suite with the clock moved weeks
   and months ahead. Tests with dates hard-coded near "today" pass for a few days, then break every
@@ -58,7 +57,7 @@ The `dev` task starts the app so saved changes appear without a manual restart o
   file) and commit lockfiles (`uv.lock` / `requirements*.txt` pins, `package-lock.json`).
 - `python dev.py setup` works from a clean clone, is safe to re-run, and never needs secrets. It
   installs the repository's own dependency files (`requirements*.txt`, `pyproject.toml`,
-  `package-lock.json`), so the FAST checks see the same imports CI and production do.
+  `package-lock.json`), so the FAST checks see the same imports production does.
 - Every new git worktree (agent worktrees included) runs `python dev.py setup` before its first
   check or push: a worktree has no `.venv` or `node_modules` of its own, and the pre-push FAST
   hook then runs with whatever tools it finds. After a merge that changes dependency files, run
@@ -82,18 +81,16 @@ The `dev` task starts the app so saved changes appear without a manual restart o
 
 ## 6. Shared pieces and fast validation
 
-- CI calls the shared reusable workflow `Chaddacus/dev-standards/.github/workflows/check.yml@v1`
-  (`python dev.py setup` + `python dev.py check`, dependency caching). Improve CI there once.
+- No GitHub Actions workflows (owner 2026-10-31). Checks run locally through `dev.py`.
 - Interfaces between repositories (asset specs, API payloads, manifests) are versioned JSON
   schemas owned by the producing repository; both sides validate against the pinned version in
-  CI, so a breaking change fails in the repository that made it.
+  their FAST tier, so a breaking change fails in the repository that made it.
 - Web changes get a preview: GitHub Pages per-PR previews where the repository can use Pages,
   otherwise a preview build on the owner's host. The PR links it.
 - Unreal: keep the engine's shared local DDC (`%LOCALAPPDATA%/UnrealEngine/Common/DerivedDataCache`,
   shared by every worktree; never point a project at a project-relative DDC); compile through
   persistent worktrees.
-- Merges: after the verifier passes, enable GitHub auto-merge so the PR lands the moment CI is
-  green. Repositories that opt in (`deploy: auto` in the ops config) deploy right after merge
+- Merges: merge once the verifier passes and the local checks pass. Repositories that opt in (`deploy: auto` in the ops config) deploy right after merge
   through `dev.py deploy` (health check + automatic rollback).
 
 ## 7. Small batches
@@ -104,7 +101,7 @@ cannot land in one small PR into independent issues.
 ## Applying it
 
 - New project: start from the templates; the first PR already has `dev.py`, hot reload, FAST tier,
-  pins, `.env.example`, `/healthz`, and CI running `dev.py check`.
+  pins, `.env.example`, `/healthz`, and a pre-push hook running `dev.py fast`.
 - Existing project: close the gaps `baseline.py audit` reports under "rapid-dev", one small PR
   each, keeping the project's existing tools behind the standard commands.
 - Record any stack-specific recipe learned while doing this back into this file (global-first).

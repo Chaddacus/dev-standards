@@ -142,7 +142,13 @@ class HookCache(unittest.TestCase):
                 mock.patch("sys.stdout", new_callable=io.StringIO) as out:
             baseline.cmd_hook(None)
         self.assertEqual(calls, [])
-        self.assertIn("no CI workflow", out.getvalue())  # file facts still come from the clone
+        self.assertIn("no dev.py", out.getvalue())  # file facts still come from the clone
+
+    def test_workflow_is_reported_for_deletion(self):
+        # Owner 2026-10-31: no CI; a workflow is a gap, a missing one is not.
+        base = {"repo": "Chaddacus/x", "label": True, "basic_protection": True, "empty": False, "full_protection": False}
+        self.assertTrue(any("delete it" in g for g in baseline.gaps({**base, "ci": True})))
+        self.assertFalse(any("CI" in g for g in baseline.gaps({**base, "ci": False})))
 
 
 class LocalRoot(unittest.TestCase):

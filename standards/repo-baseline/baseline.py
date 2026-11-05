@@ -4,7 +4,7 @@
 Baseline per repo:
   - ops labels: needs-owner, agent-ready, agent-in-progress
   - default branch ruleset: no deletion, no force-push
-  - a CI workflow (reported; Claude adds it, since checks are repo-specific)
+  - no CI workflow (owner 2026-10-31: no GitHub Actions; a workflow is reported for deletion)
 
 Commands:
   hook            SessionStart hook: check the repo in the session cwd, apply what is safe,
@@ -394,17 +394,14 @@ def gaps(state):
         state["repo"], {}).get("compose_watch", "")
     if state.get("containers") and not state.get("compose_watch", True) and not str(exempt).startswith("exempt"):
         g.append("rapid-dev: containers without a hot-reload compose override (develop.watch)")
-    for x in state.get("ci_cost", []):
-        g.append(f"GitHub-light CI: workflow {x} (keep one job on pull_request only, LFS off)")
+    if state.get("ci"):
+        g.append("GitHub Actions workflow present: delete it; there is no CI, local checks gate merges "
+                 "(owner 2026-10-31)")
     lfs_exempt = load(Path.home() / ".claude" / "ops" / "config.json", {}).get("repos", {}).get(
         state["repo"], {}).get("lfs_fetchexclude", "")
     if not state.get("lfs_fetchexclude", True) and not str(lfs_exempt).startswith("exempt"):
         g.append("Git LFS repo without an `.lfsconfig` `fetchexclude` for raw source art, so every clone "
                  "and fetch downloads it (GitHub-light operation)")
-    if not state["ci"]:
-        g.append("no CI workflow")
-    elif not state["full_protection"] and not direct_push(state["repo"]):
-        g.append("CI exists but merges do not require it (no PR + required-check ruleset)")
     return g
 
 

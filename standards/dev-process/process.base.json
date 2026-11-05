@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "loop": [
+    {"step": "Question", "text": "Name the player experience or risk this work is about."},
+    {"step": "Predict", "text": "Write the hypothesis, a measurable prediction and a kill/revert rule before any result exists. Commit them first."},
+    {"step": "Build", "text": "Make the smallest change that can test the prediction. Experiment code is disposable."},
+    {"step": "Measure", "text": "Run the method at the rung the claim needs. Record build hash, seeds, bot policy and artifacts."},
+    {"step": "Decide", "text": "Keep, revise, remove, inconclusive or investigate. Record the decision and what was not shown."}
+  ],
+  "ladder": [
+    {"rung": "E0", "name": "Correctness", "text": "Unit tests, digests, validators. Proves the code does what it says, not that it is good."},
+    {"rung": "E1", "name": "One bot", "text": "Seeded simulation with one bot policy. Proves a measurable property under that policy."},
+    {"rung": "E2", "name": "Bot personas", "text": "Several bot personas (for example cautious, greedy, random) over many seeds. Proves the property is robust to play style."},
+    {"rung": "E3", "name": "Recorded play", "text": "The owner's recorded play with telemetry. Shows what a human actually did."},
+    {"rung": "E4", "name": "Owner judgment", "text": "The owner's judgment against a goal written down before the playtest. The only rung for fun, feel and look."}
+  ],
+  "ladder_rules": [
+    "A result never claims a higher rung than it reached.",
+    "Every result names its rung, bot policy, seed count and build hash.",
+    "Claims about fun, feel, clarity or look need E3 or E4. Request a playtest; do not infer them from bots."
+  ],
+  "card": [
+    {"id": "question", "label": "Question", "help": "What do we want to learn?", "required": true},
+    {"id": "goal", "label": "Experience goal", "help": "What should the player feel or do?", "required": true},
+    {"id": "hypothesis", "label": "Hypothesis", "help": "If we change X, then Y, because Z.", "required": true},
+    {"id": "prediction", "label": "Prediction", "help": "A measurable number or observable event, with the threshold. Committed before the run; its author does not edit it afterwards.", "required": true},
+    {"id": "kill", "label": "Kill/revert rule", "help": "The result that makes us remove or revert the change.", "required": true},
+    {"id": "method", "label": "Method and rung", "help": "How it is measured, and the rung (E0-E4) the claim needs.", "required": true},
+    {"id": "result", "label": "Result", "help": "Filled after the run: numbers, artifacts, build hash.", "required": false},
+    {"id": "reached", "label": "Reached / not shown", "help": "Filled after the run: the rung reached and what this does not show.", "required": false},
+    {"id": "decision", "label": "Decision", "help": "Filled after the run: keep, revise, remove, inconclusive or investigate.", "required": false}
+  ],
+  "card_rules": [
+    "The prediction is committed before results exist. Its author may not edit it afterwards; a correction is a new comment.",
+    "The checking agent confirms the prediction predates the results (issue edit history or commit order)."
+  ],
+  "playtest_request": [
+    {"id": "build", "label": "Build", "help": "Build or package path and commit hash.", "required": true},
+    {"id": "hypothesis", "label": "Hypothesis", "help": "The card this playtest tests (#issue).", "required": true},
+    {"id": "questions", "label": "Questions (1-2, observable)", "help": "What we watch for, not what we ask.", "required": true},
+    {"id": "task", "label": "Task and length", "help": "What to play and for how long.", "required": true},
+    {"id": "known", "label": "What you already know", "help": "Anything that spoils the test; keep it short.", "required": true},
+    {"id": "recorded", "label": "Auto-recorded", "help": "Telemetry and captures collected without your help.", "required": true},
+    {"id": "prompts", "label": "Open prompts (2-3)", "help": "Asked after play, open-ended.", "required": true},
+    {"id": "rule", "label": "Decision rule", "help": "Written before the playtest: what result means keep, revise or remove.", "required": true},
+    {"id": "prior", "label": "Prior evidence", "help": "E0-E2 results already in hand.", "required": true},
+    {"id": "results", "label": "Results", "help": "Filled after the playtest, as a comment.", "required": false}
+  ],
+  "classes": {
+    "experiment": {
+      "title": "Experiment",
+      "use": "Testing a hypothesis about play. Code is disposable.",
+      "gate": "A linked card with the prediction committed first, plus evidence at the card's rung.",
+      "min_rung": "E1",
+      "sections": ["Card", "Evidence", "Reached / not shown", "Decision"]
+    },
+    "tuning": {
+      "title": "Tuning",
+      "use": "Numbers-only changes to tuning data.",
+      "gate": "An E1 or E2 improvement against the prior numbers.",
+      "min_rung": "E1",
+      "sections": ["Evidence", "Reached / not shown"]
+    },
+    "content": {
+      "title": "Content / presentation",
+      "use": "Art, UI, audio, VFX and copy.",
+      "gate": "Fits the art kit, a walkthrough of every state, and owner judgment (E4) for look claims.",
+      "min_rung": "E0",
+      "sections": ["Evidence", "Reached / not shown"]
+    },
+    "feature": {
+      "title": "Code feature",
+      "use": "New or changed behavior that ships.",
+      "gate": "Tests that fail without the change (E0), a performance check where relevant, docs updated; E3 or E4 for feel claims.",
+      "min_rung": "E0",
+      "sections": ["Evidence", "Reached / not shown"]
+    },
+    "fix": {
+      "title": "Fix",
+      "use": "A defect against accepted behavior.",
+      "gate": "A regression test that fails before the fix.",
+      "min_rung": "E0",
+      "sections": ["Evidence"]
+    },
+    "infra": {
+      "title": "Infrastructure",
+      "use": "Tools, CI, docs and process that do not change the game.",
+      "gate": "CI passes.",
+      "min_rung": "",
+      "sections": []
+    }
+  },
+  "pr_checklist": [
+    "Class line set, and the gate for that class is met.",
+    "Evidence lines point at files in this PR or links, not at descriptions.",
+    "The rung claimed is the rung reached; limits are under \"Reached / not shown\".",
+    "Another agent (or a fresh verifier) checked the work."
+  ]
+}
