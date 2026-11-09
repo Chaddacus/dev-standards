@@ -20,6 +20,10 @@ Accuracy:
 Speed:
 - Delegate reading of more than a few files to the `reader` agent (Haiku).
 - Batch independent commands.
+- Do not call `mcp__ccd_turn__*` (the app's task list): it refuses subagents.
+- In an isolated worktree, send one plain command per call, already in the worktree: no `cd` to its
+  path, no `$(...)`, loops, or `powershell` inside Bash. Create files with Write. Put multi-step
+  work in a script file in the worktree. The isolation check refuses anything it cannot verify.
 - Keep context small: read only the parts of files you need, and keep long logs out of the
   conversation. When the spend guard says your context passed its limit, stop starting new work:
   commit and push, post a `milestone` update, and reply with a handoff (done, left, next step,
